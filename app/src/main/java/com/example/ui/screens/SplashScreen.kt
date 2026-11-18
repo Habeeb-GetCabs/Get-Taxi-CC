@@ -80,7 +80,7 @@ fun SplashScreen(onNavigateToHome: () -> Unit) {
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "SANGAM TARIFF METER • OFFLINE",
+                text = "OFFLINE TAXI METER • GET TAXI",
                 color = Color(0xFFFFC107),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black,

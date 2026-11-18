@@ -38,15 +38,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.ActiveTripDisplayMode
 import com.example.data.model.ExtraChargeItem
 import com.example.data.model.TripStatus
+import com.example.data.preferences.OtpValidationResult
 import com.example.service.LocationTrackingService
 import com.example.ui.components.BatteryOptimizationCard
 import com.example.ui.components.CreatorSignatureBanner
 import com.example.ui.components.FloatingSpeedPermissionCard
+import com.example.ui.components.GetTaxiTariffDetailsDialog
 import com.example.ui.components.LiveSpeedBubble
 import com.example.ui.components.LogoStyleCustomizerDialog
 import com.example.ui.components.QuickFareCalculatorDialog
 import com.example.ui.components.SangamModifiersAndRatePreviewCard
-import com.example.ui.components.SangamTariffChartDialog
 import com.example.ui.components.SangamTripTypeSelectorCard
 import com.example.ui.components.TripMapView
 import com.example.ui.components.VehicleCategorySelectorCard
@@ -90,11 +91,18 @@ fun HomeMeterScreen(
     val activeTripDisplayMode by viewModel.activeTripDisplayMode.collectAsStateWithLifecycle()
     val hasBackup by viewModel.hasActiveSessionBackup.collectAsStateWithLifecycle()
     val validationMessage by viewModel.tariffValidationMessage.collectAsStateWithLifecycle()
+    val outstationWaitRate by viewModel.outstationWaitRate.collectAsStateWithLifecycle()
+    val additionalWaitingHours by viewModel.additionalWaitingHours.collectAsStateWithLifecycle()
 
     var showQuickCalculatorDialog by remember { mutableStateOf(false) }
-    var showTariffChartDialog by remember { mutableStateOf(false) }
+    var showTariffDetailsDialog by remember { mutableStateOf(false) }
     var showExtraChargesDialog by remember { mutableStateOf(false) }
     var showLogoStyleDialog by remember { mutableStateOf(false) }
+    var showOtpDialog by remember { mutableStateOf(false) }
+    var otpInput by remember { mutableStateOf("") }
+    var otpErrorMsg by remember { mutableStateOf<String?>(null) }
+    var logoTapCount by remember { mutableIntStateOf(0) }
+    var lastLogoTapTimeMs by remember { mutableLongStateOf(0L) }
     var isMapExpanded by remember { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
 
@@ -155,7 +163,15 @@ fun HomeMeterScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clickable { showLogoStyleDialog = true }
+                            .clickable {
+                                val now = System.currentTimeMillis()
+                                logoTapCount = if (now - lastLogoTapTimeMs <= 2000L) logoTapCount + 1 else 1
+                                lastLogoTapTimeMs = now
+                                if (logoTapCount >= 5) {
+                                    logoTapCount = 0
+                                    showTariffDetailsDialog = true
+                                }
+                            }
                             .testTag("brand_header_title")
                     ) {
                         VendorLogoBadge(
@@ -168,14 +184,14 @@ fun HomeMeterScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { showTariffChartDialog = true },
+                        onClick = onNavigateToAbout,
                         modifier = Modifier
                             .testTag("tariff_chart_button")
                             .minimumInteractiveComponentSize()
                     ) {
                         Icon(
                             imageVector = Icons.Default.TableChart,
-                            contentDescription = "Sangam Tariff Chart",
+                            contentDescription = "GET TAXI & HDS Info",
                             tint = HudYellow
                         )
                     }
@@ -223,14 +239,6 @@ fun HomeMeterScreen(
                             expanded = showTopMenu,
                             onDismissRequest = { showTopMenu = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Sangam Tariff Chart") },
-                                onClick = {
-                                    showTopMenu = false
-                                    showTariffChartDialog = true
-                                },
-                                leadingIcon = { Icon(Icons.Default.TableChart, contentDescription = null, tint = HudYellow) }
-                            )
                             DropdownMenuItem(
                                 text = { Text("Logo Color & Font") },
                                 onClick = {
@@ -363,7 +371,7 @@ fun HomeMeterScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "OFFLINE SANGAM METER • GET TAXI",
+                            text = "OFFLINE TAXI METER • GET TAXI",
                             color = HudMuted,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
@@ -481,10 +489,13 @@ fun HomeMeterScreen(
                     isNightTrip = if (isTripActive) tripState.isNightTrip else isNightTrip,
                     packageHours = if (isTripActive) tripState.packageHours else packageHours,
                     over12Hours = if (isTripActive) tripState.over12Hours else over12Hours,
+                    additionalWaitingHours = if (isTripActive) tripState.outstationAdditionalWaitingHours else additionalWaitingHours,
+                    outstationWaitRate = if (isTripActive) tripState.outstationWaitRate else outstationWaitRate,
                     onToggleOutsideCity = { viewModel.setOutsideCity(it) },
                     onToggleNightTrip = { viewModel.setNightTrip(it) },
                     onSelectPackageHours = { viewModel.setPackageHours(it) },
-                    onToggleOver12Hours = { viewModel.setOver12Hours(it) }
+                    onToggleOver12Hours = { viewModel.setOver12Hours(it) },
+                    onUpdateAdditionalWaitingHours = { viewModel.setAdditionalWaitingHours(it) }
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -493,6 +504,11 @@ fun HomeMeterScreen(
                 MeterActionControls(
                     status = tripState.status,
                     onStartTrip = { viewModel.startTrip() },
+                    onOpenOtpStart = {
+                        otpInput = ""
+                        otpErrorMsg = null
+                        showOtpDialog = true
+                    },
                     onOpenParkedCalculator = { showQuickCalculatorDialog = true },
                     onPauseTrip = { viewModel.pauseTrip() },
                     onResumeTrip = { viewModel.resumeTrip() },
@@ -514,8 +530,28 @@ fun HomeMeterScreen(
         )
     }
 
-    if (showTariffChartDialog) {
-        SangamTariffChartDialog(onDismiss = { showTariffChartDialog = false })
+    if (showTariffDetailsDialog) {
+        GetTaxiTariffDetailsDialog(onDismiss = { showTariffDetailsDialog = false })
+    }
+
+    if (showOtpDialog) {
+        OtpEntryDialog(
+            otpInput = otpInput,
+            errorMsg = otpErrorMsg,
+            onOtpChange = { value ->
+                otpInput = value.filter { it.isDigit() }.take(4)
+                otpErrorMsg = null
+            },
+            onDismiss = { showOtpDialog = false },
+            onConfirmStart = {
+                viewModel.startTripWithOtp(otpInput) { result ->
+                    when (result) {
+                        is OtpValidationResult.Success -> showOtpDialog = false
+                        is OtpValidationResult.Failure -> otpErrorMsg = result.message
+                    }
+                }
+            }
+        )
     }
 
     if (showQuickCalculatorDialog) {
@@ -527,6 +563,7 @@ fun HomeMeterScreen(
             initialNightTrip = isNightTrip,
             initialPackageHours = packageHours,
             initialOver12Hours = over12Hours,
+            outstationWaitRate = outstationWaitRate,
             onDismiss = { showQuickCalculatorDialog = false },
             onCalculateAndSettle = { input, pickup, drop, durMin ->
                 showQuickCalculatorDialog = false
@@ -748,6 +785,7 @@ private fun MetricTile(label: String, value: String, modifier: Modifier = Modifi
 private fun MeterActionControls(
     status: TripStatus,
     onStartTrip: () -> Unit,
+    onOpenOtpStart: () -> Unit,
     onOpenParkedCalculator: () -> Unit,
     onPauseTrip: () -> Unit,
     onResumeTrip: () -> Unit,
@@ -769,6 +807,21 @@ private fun MeterActionControls(
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("START METER", fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenOtpStart,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, HudYellow),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = HudCard, contentColor = HudYellow),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("start_with_otp_button")
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = HudYellow, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Start with OTP", fontSize = 14.sp, fontWeight = FontWeight.Black)
                     }
 
                     OutlinedButton(
@@ -943,3 +996,96 @@ private fun ActiveExtraChargesDialog(
         }
     }
 }
+
+@Composable
+private fun OtpEntryDialog(
+    otpInput: String,
+    errorMsg: String?,
+    onOtpChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirmStart: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = HudCharcoal),
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(1.5.dp, HudYellow),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("otp_entry_dialog")
+        ) {
+            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("START WITH OTP", color = HudYellow, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = HudMuted)
+                    }
+                }
+
+                Text(
+                    text = "Enter 4-digit ride OTP to authorize and start the trip meter.",
+                    color = HudMuted,
+                    fontSize = 12.sp
+                )
+
+                OutlinedTextField(
+                    value = otpInput,
+                    onValueChange = onOtpChange,
+                    label = { Text("4-Digit OTP") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = errorMsg != null,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = HudYellow,
+                        unfocusedBorderColor = HudBorder,
+                        focusedLabelColor = HudYellow,
+                        unfocusedLabelColor = HudMuted,
+                        focusedTextColor = HudWhite,
+                        unfocusedTextColor = HudWhite,
+                        cursorColor = HudYellow
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("otp_input_field")
+                )
+
+                if (errorMsg != null) {
+                    Text(
+                        text = errorMsg,
+                        color = Color(0xFFEF4444),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.testTag("otp_error_text")
+                    )
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, HudBorder),
+                        modifier = Modifier.weight(1f).height(48.dp)
+                    ) {
+                        Text("CANCEL", color = HudWhite, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = onConfirmStart,
+                        colors = ButtonDefaults.buttonColors(containerColor = HudYellow, contentColor = HudBlack),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(48.dp)
+                            .testTag("otp_confirm_start_button")
+                    ) {
+                        Text("VALIDATE & START", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+

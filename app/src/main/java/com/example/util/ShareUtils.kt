@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.example.data.database.DriverProfileEntity
 import com.example.data.database.TripEntity
 import com.example.data.model.ExtraChargeItem
 import com.example.data.model.ServiceType
@@ -198,10 +199,14 @@ object ShareUtils {
         return buildVendorReceiptText(trip)
     }
 
+    /**
+     * Customer-facing bill text ONLY. Strictly excludes Driver CC, commission rules,
+     * Driver Net Balance, and internal CC settlement GPay numbers.
+     */
     fun buildSangamReceiptText(
         trip: TripEntity,
         breakdown: SangamTariffCalculator.SangamSettlementBreakdown,
-        includeSettlementNote: Boolean = false
+        @Suppress("UNUSED_PARAMETER") includeSettlementNote: Boolean = false
     ): String {
         val catLabel = if (breakdown.isInnovaCrysta) "INNOVA CRYSTA" else breakdown.vehicleCategory.displayName
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
@@ -230,32 +235,64 @@ object ShareUtils {
                 append("• ${item.label} (${item.detail}): ${SangamTariffCalculator.formatRupees(item.amount)}\n")
             }
             append("\n*Total Customer Bill: ${SangamTariffCalculator.formatRupees(breakdown.customerBillTotal)}*\n")
+            append("\nThank you for travelling with GET TAXI!")
+        }
+    }
 
-            if (includeSettlementNote) {
-                append("\n--- GET TAXI Settlement ---\n")
-                when (val comm = breakdown.commissionResult) {
-                    is SangamTariffCalculator.CommissionResult.Confirmed -> {
-                        append("Vendor Commission (${comm.ruleLabel}): ${SangamTariffCalculator.formatRupees(comm.amount)}\n")
-                    }
-                    is SangamTariffCalculator.CommissionResult.NeedsConfirmation -> {
-                        append("Vendor Commission: NEEDS CONFIRMATION (${comm.reason})\n")
-                    }
-                    is SangamTariffCalculator.CommissionResult.NotSpecified -> {
-                        append("Vendor Commission: NOT SPECIFIED (${comm.reason})\n")
-                    }
+    /**
+     * Separate Driver / Office Internal CC Report containing Driver ID, Vehicle Details,
+     * Trip Category, Approved CC amount & rule, Driver Net Balance, and GET TAXI CC GPay number.
+     */
+    fun buildInternalCcReportText(
+        trip: TripEntity,
+        breakdown: SangamTariffCalculator.SangamSettlementBreakdown,
+        driverProfile: DriverProfileEntity? = null
+    ): String {
+        val catLabel = if (breakdown.isInnovaCrysta) "INNOVA CRYSTA" else breakdown.vehicleCategory.displayName
+        val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US)
+            .format(Date(trip.endTime.takeIf { it > 0L } ?: System.currentTimeMillis()))
+        val driverName = driverProfile?.driverName?.ifBlank { null } ?: trip.driverName.ifBlank { "GET TAXI Driver" }
+        val driverId = driverProfile?.driverId?.ifBlank { null } ?: "N/A"
+        val vehicleReg = driverProfile?.vehicleNumber?.ifBlank { null } ?: trip.vehicleNumber.ifBlank { "N/A" }
+
+        return buildString {
+            append("*GET TAXI — Internal CC Report*\n")
+            append("Report / Bill ID: ${trip.tripNumber}\n")
+            append("Date: $dateStr\n")
+            append("Driver: $driverName (ID: $driverId)\n")
+            append("Vehicle: $vehicleReg • $catLabel\n")
+            append("Trip Type: ${breakdown.tripType.displayName}\n")
+            append("Distance: ${String.format(Locale.US, "%.2f", breakdown.distanceKm)} km\n")
+            append("Duration: ${formatDurationHhMmSs(trip.durationSeconds)}\n")
+            append("Customer Bill Total: ${SangamTariffCalculator.formatRupees(breakdown.customerBillTotal)}\n")
+
+            when (val comm = breakdown.commissionResult) {
+                is SangamTariffCalculator.CommissionResult.Confirmed -> {
+                    append("Approved CC (${comm.ruleLabel}): ${SangamTariffCalculator.formatRupees(comm.amount)}\n")
                 }
-                when (val bal = breakdown.driverBalanceStatus) {
-                    is SangamTariffCalculator.DriverBalanceStatus.Confirmed -> {
-                        append("Driver Balance: ${SangamTariffCalculator.formatRupees(bal.amount)}\n")
-                    }
-                    is SangamTariffCalculator.DriverBalanceStatus.RangePendingConfirmation -> {
-                        append("Driver Balance: Pending Confirmation\n")
-                    }
+                is SangamTariffCalculator.CommissionResult.NeedsConfirmation -> {
+                    append("CC Status: NEEDS CONFIRMATION (${comm.reason})\n")
                 }
-                append("GET TAXI GPay: ${SangamTariffConfig.VENDOR_GPAY_NUMBER}\n")
+                is SangamTariffCalculator.CommissionResult.NotSpecified -> {
+                    append("CC Status: NOT SPECIFIED (${comm.reason})\n")
+                }
             }
 
-            append("\nThank you for travelling with GET TAXI!")
+            when (val bal = breakdown.driverBalanceStatus) {
+                is SangamTariffCalculator.DriverBalanceStatus.Confirmed -> {
+                    append("Driver Net Balance: ${SangamTariffCalculator.formatRupees(bal.amount)}\n")
+                }
+                is SangamTariffCalculator.DriverBalanceStatus.RangePendingConfirmation -> {
+                    val rangeStr = if (bal.minDriverBalance != null && bal.maxDriverBalance != null) {
+                        "${SangamTariffCalculator.formatRupees(bal.minDriverBalance)} – ${SangamTariffCalculator.formatRupees(bal.maxDriverBalance)}"
+                    } else {
+                        "Pending Confirmation"
+                    }
+                    append("Driver Net Balance: $rangeStr\n")
+                }
+            }
+
+            append("GET TAXI CC GPay: ${SangamTariffConfig.VENDOR_GPAY_NUMBER}")
         }
     }
 }

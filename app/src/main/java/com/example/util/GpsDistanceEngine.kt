@@ -119,7 +119,7 @@ class GpsDistanceEngine(
                 distanceIncrementM = 0.0,
                 totalDistanceKm = accumulatedDistanceKm,
                 speedKmH = speed,
-                isMoving = speed >= speedThresholdKmH,
+                isMoving = speed > speedThresholdKmH,
                 accepted = true
             )
         }
@@ -155,7 +155,7 @@ class GpsDistanceEngine(
                 distanceIncrementM = 0.0,
                 totalDistanceKm = accumulatedDistanceKm,
                 speedKmH = speed,
-                isMoving = speed >= speedThresholdKmH,
+                isMoving = speed > speedThresholdKmH,
                 accepted = true,
                 rejectionReason = "GPS gap of ${timeDeltaS.toInt()}s detected: resuming without interpolating",
                 gapDetected = true
@@ -171,7 +171,7 @@ class GpsDistanceEngine(
             0f
         }
 
-        val isMoving = speedKmh >= speedThresholdKmH
+        val isMoving = speedKmh > speedThresholdKmH
 
         // 8. Stationary Jitter Suppression:
         // When stationary (< speedThresholdKmH), suppress satellite drift flutter

@@ -121,50 +121,49 @@ class SangamTariffCalculatorTest {
     }
 
     @Test
-    fun `hourly rental exact package lookup tables 1h to 12h for all 5 car categories`() {
-        val miniExpected = mapOf(
-            1 to "350.00", 2 to "700.00", 3 to "1050.00", 4 to "1300.00",
-            5 to "1625.00", 6 to "1950.00", 7 to "2275.00", 8 to "2600.00",
-            9 to "2925.00", 10 to "3250.00", 11 to "3575.00", 12 to "3900.00"
-        )
-        miniExpected.forEach { (hrs, amt) ->
-            val res = SangamTariffCalculator.calculateHourlyRental(VehicleCategory.MINI, hrs, actualDistanceKm = 5.0)
-            assertEquals("MINI ${hrs}h", BigDecimal(amt), res.customerBillTotal)
-        }
-
-        val sedanExpected = mapOf(
-            1 to "375.00", 2 to "750.00", 3 to "1125.00", 4 to "1400.00",
-            5 to "1750.00", 6 to "2100.00", 7 to "2450.00", 8 to "2800.00",
-            9 to "3150.00", 10 to "3500.00", 11 to "3850.00", 12 to "4200.00"
-        )
-        sedanExpected.forEach { (hrs, amt) ->
-            val res = SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SEDAN, hrs, actualDistanceKm = 5.0)
-            assertEquals("SEDAN ${hrs}h", BigDecimal(amt), res.customerBillTotal)
-        }
-
-        // Verify SUV 1h & 2h both 1000, 3h 1275, 12h 5100
-        assertEquals(BigDecimal("1000.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV, 1, 10.0).customerBillTotal)
-        assertEquals(BigDecimal("1000.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV, 2, 20.0).customerBillTotal)
-        assertEquals(BigDecimal("1275.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV, 3, 30.0).customerBillTotal)
-        assertEquals(BigDecimal("5100.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV, 12, 120.0).customerBillTotal)
-
-        // Verify SUV+ & INNOVA exact tables
-        assertEquals(BigDecimal("1100.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV_PLUS, 2, 20.0).customerBillTotal)
-        assertEquals(BigDecimal("5400.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.SUV_PLUS, 12, 120.0).customerBillTotal)
-        assertEquals(BigDecimal("1200.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.INNOVA, 2, 20.0).customerBillTotal)
-        assertEquals(BigDecimal("5700.00"), SangamTariffCalculator.calculateHourlyRental(VehicleCategory.INNOVA, 12, 120.0).customerBillTotal)
-
-        // MINI extra km + waiting + 10% commission
-        val miniWithExtra = SangamTariffCalculator.calculateHourlyRental(
+    fun `hourly rental uses unified GET TAXI rates, 5-min grace rule, zero wait, and 50 per hr CC`() {
+        // 1h package, 5km, 30 min -> 1 charged hr: ₹350, ₹50 CC, ₹300 driver net
+        val oneHr = SangamTariffCalculator.calculateHourlyRental(
             category = VehicleCategory.MINI,
-            packageHours = 2,
-            actualDistanceKm = 25.0, // 5 extra km * 18 = 90
-            waitingMinutes = 10.0    // 10 * 2.08 = 20.80
+            packageHours = 1,
+            actualDistanceKm = 5.0,
+            durationSeconds = 30 * 60L
         )
-        // 700 + 90 + 20.80 = 810.80
-        assertEquals(BigDecimal("810.80"), miniWithExtra.customerBillTotal)
-        assertEquals(BigDecimal("81.08"), (miniWithExtra.commissionResult as CommissionResult.Confirmed).amount)
-        assertEquals(BigDecimal("729.72"), (miniWithExtra.driverBalanceStatus as DriverBalanceStatus.Confirmed).amount)
+        assertEquals(BigDecimal("350.00"), oneHr.customerBillTotal)
+        assertEquals(BigDecimal("50.00"), (oneHr.commissionResult as CommissionResult.Confirmed).amount)
+        assertEquals(BigDecimal("300.00"), (oneHr.driverBalanceStatus as DriverBalanceStatus.Confirmed).amount)
+
+        // 5-min grace: 65m00s stays 1 charged hour across any vehicle category
+        val graceInside = SangamTariffCalculator.calculateHourlyRental(
+            category = VehicleCategory.INNOVA,
+            packageHours = 1,
+            actualDistanceKm = 10.0,
+            durationSeconds = 65 * 60L
+        )
+        assertEquals(BigDecimal("350.00"), graceInside.customerBillTotal)
+        assertEquals(BigDecimal("50.00"), (graceInside.commissionResult as CommissionResult.Confirmed).amount)
+
+        // 65m01s crosses into 2 charged hours (20 km included)
+        val graceCrossed = SangamTariffCalculator.calculateHourlyRental(
+            category = VehicleCategory.SUV,
+            packageHours = 1,
+            actualDistanceKm = 15.0,
+            durationSeconds = 65 * 60L + 1L
+        )
+        assertEquals(BigDecimal("700.00"), graceCrossed.customerBillTotal)
+        assertEquals(BigDecimal("100.00"), (graceCrossed.commissionResult as CommissionResult.Confirmed).amount)
+
+        // 2h package, 25 km (5 extra km * ₹20 = ₹100), waitingMinutes = 10.0 ignored (zero wait charge)
+        val withExtraKmAndWait = SangamTariffCalculator.calculateHourlyRental(
+            category = VehicleCategory.SEDAN,
+            packageHours = 2,
+            actualDistanceKm = 25.0,
+            waitingMinutes = 10.0
+        )
+        // 2 * 350 + 5 * 20 = 800.00; CC = 2 * 50 = 100.00; driver = 700.00
+        assertEquals(BigDecimal("800.00"), withExtraKmAndWait.customerBillTotal)
+        assertEquals(BigDecimal("100.00"), (withExtraKmAndWait.commissionResult as CommissionResult.Confirmed).amount)
+        assertEquals(BigDecimal("700.00"), (withExtraKmAndWait.driverBalanceStatus as DriverBalanceStatus.Confirmed).amount)
     }
 
     @Test
@@ -190,7 +189,20 @@ class SangamTariffCalculatorTest {
     }
 
     @Test
-    fun `day rental, innova crysta, and tempo or urbania rates and missing commission flags`() {
+    fun `day rental, innova crysta rates, 5 categories, and missing commission flags`() {
+        assertEquals(5, VehicleCategory.entries.size)
+        assertEquals(SangamTripType.entries, VehicleCategory.MINI.supportedTripTypes())
+
+        val mini = SangamTariffCalculator.calculateDayRental(VehicleCategory.MINI, distanceKm = 100.0)
+        assertEquals(BigDecimal("3000.00"), mini.customerBillTotal) // 2000 + 100*10
+        assertTrue(mini.commissionResult is CommissionResult.NotSpecified)
+
+        val suv = SangamTariffCalculator.calculateDayRental(VehicleCategory.SUV, distanceKm = 100.0)
+        assertEquals(BigDecimal("3600.00"), suv.customerBillTotal) // 2300 + 100*13
+
+        val suvPlus = SangamTariffCalculator.calculateDayRental(VehicleCategory.SUV_PLUS, distanceKm = 100.0)
+        assertEquals(BigDecimal("3800.00"), suvPlus.customerBillTotal) // 2400 + 100*14
+
         val innova = SangamTariffCalculator.calculateDayRental(VehicleCategory.INNOVA, distanceKm = 100.0, isInnovaCrysta = false)
         assertEquals(BigDecimal("4000.00"), innova.customerBillTotal) // 2500 + 1500
         assertTrue(innova.commissionResult is CommissionResult.NotSpecified)
@@ -199,19 +211,5 @@ class SangamTariffCalculatorTest {
         assertEquals(BigDecimal("4600.00"), crysta.customerBillTotal) // 3000 + 1600
         assertTrue(crysta.isInnovaCrysta)
         assertTrue(crysta.commissionResult is CommissionResult.NotSpecified)
-
-        val tt12 = SangamTariffCalculator.calculateDayRental(VehicleCategory.TEMPO_TRAVELLER_12_14, distanceKm = 100.0, after12Hours = true)
-        assertEquals(BigDecimal("5800.00"), tt12.customerBillTotal) // 3500 + 1800 + 500
-        assertTrue(tt12.commissionResult is CommissionResult.NotSpecified)
-
-        val urbania16 = SangamTariffCalculator.calculateDayRental(VehicleCategory.FORCE_URBANIA_16_18, distanceKm = 100.0, after12Hours = true)
-        assertEquals(BigDecimal("9500.00"), urbania16.customerBillTotal) // 6000 + 3000 + 500
-        assertTrue(urbania16.commissionResult is CommissionResult.NotSpecified)
-
-        // Tempo/Urbania only support Day Rental
-        assertEquals(listOf(SangamTripType.DAY_RENTAL), VehicleCategory.TEMPO_TRAVELLER_12_14.supportedTripTypes())
-        assertFalse(SangamTariffCalculator.calculateTripFareAndSettlement(
-            TripCalculationInput(VehicleCategory.FORCE_URBANIA_12_14, SangamTripType.LOCAL_NORMAL, distanceKm = 5.0)
-        ).warnings.isEmpty())
     }
 }

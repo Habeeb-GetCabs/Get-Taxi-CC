@@ -10,6 +10,7 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.example.data.database.DriverProfileEntity
 import com.example.data.database.TripEntity
 import com.example.data.model.ExtraChargeItem
 import com.example.data.model.ServiceType
@@ -133,6 +134,33 @@ object PdfGenerator {
             val fallbackBitmap = Bitmap.createBitmap(PAGE_WIDTH, PAGE_HEIGHT, Bitmap.Config.ARGB_8888)
             drawSangamBillCanvas(context, Canvas(fallbackBitmap), trip, vendorMeta, breakdown)
             file.writeText("%PDF-1.4\n% ${vendorMeta.vendorName} | ${vendorMeta.tripNumber} | ${breakdown.customerBillTotal}\n%%EOF\n")
+        } finally {
+            runCatching { pdfDocument.close() }
+        }
+        return file
+    }
+
+    fun generateInternalCcReportPdf(
+        context: Context,
+        trip: TripEntity,
+        breakdown: SangamTariffCalculator.SangamSettlementBreakdown,
+        driverProfile: DriverProfileEntity? = null
+    ): File {
+        val vendorMeta = resolveVendorHeaderMetadata(trip)
+        val fileSuffix = vendorMeta.tripNumber.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val file = File(context.cacheDir, "GET_TAXI_Internal_CC_Report_${fileSuffix}.pdf")
+
+        val pdfDocument = PdfDocument()
+        try {
+            val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            drawInternalCcReportCanvas(context, page.canvas, trip, vendorMeta, breakdown, driverProfile)
+            pdfDocument.finishPage(page)
+            FileOutputStream(file).use { pdfDocument.writeTo(it) }
+        } catch (_: IllegalStateException) {
+            val fallbackBitmap = Bitmap.createBitmap(PAGE_WIDTH, PAGE_HEIGHT, Bitmap.Config.ARGB_8888)
+            drawInternalCcReportCanvas(context, Canvas(fallbackBitmap), trip, vendorMeta, breakdown, driverProfile)
+            file.writeText("%PDF-1.4\n% GET TAXI Internal CC Report | ${vendorMeta.tripNumber} | ${breakdown.customerBillTotal}\n%%EOF\n")
         } finally {
             runCatching { pdfDocument.close() }
         }
@@ -641,7 +669,7 @@ object PdfGenerator {
         paint.color = Color.rgb(71, 85, 105)
         paint.textSize = 8.5f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        canvas.drawText("Coimbatore • Sangam Tariff Schedule", brandTextX, currentY + 27f, paint)
+        canvas.drawText("Coimbatore • Official Tariff Schedule", brandTextX, currentY + 27f, paint)
         val catLabel = if (breakdown.isInnovaCrysta) "INNOVA CRYSTA" else breakdown.vehicleCategory.displayName
         canvas.drawText("$catLabel • ${breakdown.tripType.displayName}", brandTextX, currentY + 39f, paint)
 
@@ -765,7 +793,7 @@ object PdfGenerator {
         paint.color = Color.rgb(203, 213, 225)
         paint.textSize = 8f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        canvas.drawText("Sangam Tariff Applied", totalBoxX + 14f, currentY + 37f, paint)
+        canvas.drawText("Approved GET TAXI Tariff Applied", totalBoxX + 14f, currentY + 37f, paint)
 
         paint.textAlign = Paint.Align.RIGHT
         paint.color = Color.rgb(255, 193, 7)
@@ -789,7 +817,173 @@ object PdfGenerator {
         paint.color = Color.rgb(100, 116, 139)
         paint.textSize = 8.5f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        canvas.drawText("GET TAXI • Offline Sangam Meter Bill", MARGIN, currentY, paint)
+        canvas.drawText("GET TAXI • Offline Taxi Meter Bill", MARGIN, currentY, paint)
+    }
+
+    private fun drawInternalCcReportCanvas(
+        context: Context,
+        canvas: Canvas,
+        trip: TripEntity,
+        vendorMeta: InvoiceVendorHeaderMetadata,
+        breakdown: SangamTariffCalculator.SangamSettlementBreakdown,
+        driverProfile: DriverProfileEntity?
+    ) {
+        val paint = Paint().apply { isAntiAlias = true }
+        var currentY = MARGIN
+
+        paint.color = Color.rgb(9, 10, 12)
+        canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 10f, paint)
+        paint.color = Color.rgb(255, 193, 7)
+        canvas.drawRect(0f, 10f, PAGE_WIDTH.toFloat(), 14f, paint)
+
+        currentY += 10f
+        val logoBitmap = VendorLogoRenderer.renderVendorLogoBitmap(
+            context = context,
+            vendorId = vendorMeta.vendorId,
+            vendorName = vendorMeta.vendorName,
+            widthPx = 320,
+            heightPx = 122
+        )
+        canvas.drawBitmap(logoBitmap, null, RectF(MARGIN, currentY, MARGIN + 102f, currentY + 39f), Paint(Paint.FILTER_BITMAP_FLAG))
+
+        val brandTextX = MARGIN + 112f
+        paint.color = Color.rgb(15, 23, 42)
+        paint.textSize = 14f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("GET TAXI — INTERNAL CC REPORT", brandTextX, currentY + 14f, paint)
+
+        val catLabel = if (breakdown.isInnovaCrysta) "INNOVA CRYSTA" else breakdown.vehicleCategory.displayName
+        paint.color = Color.rgb(71, 85, 105)
+        paint.textSize = 8.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        canvas.drawText("Driver Commission & Settlement Statement (Internal Only)", brandTextX, currentY + 27f, paint)
+        canvas.drawText("$catLabel • ${breakdown.tripType.displayName}", brandTextX, currentY + 39f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.color = Color.rgb(15, 23, 42)
+        paint.textSize = 11f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Report ID: ${vendorMeta.tripNumber}", PAGE_WIDTH - MARGIN, currentY + 16f, paint)
+        paint.textSize = 8.5f
+        paint.color = Color.rgb(71, 85, 105)
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+            .format(Date(trip.endTime.takeIf { it > 0 } ?: System.currentTimeMillis()))
+        canvas.drawText(dateStr, PAGE_WIDTH - MARGIN, currentY + 30f, paint)
+        paint.textAlign = Paint.Align.LEFT
+
+        currentY += 54f
+        paint.color = Color.rgb(226, 232, 240)
+        canvas.drawLine(MARGIN, currentY, PAGE_WIDTH - MARGIN, currentY, paint)
+        currentY += 14f
+
+        val driverName = driverProfile?.driverName?.ifBlank { null } ?: trip.driverName.ifBlank { "GET TAXI Driver" }
+        val driverId = driverProfile?.driverId?.ifBlank { null } ?: "-"
+        val driverPhone = driverProfile?.driverMobile?.ifBlank { null } ?: trip.driverMobile.ifBlank { "-" }
+        val vehicleNo = driverProfile?.vehicleNumber?.ifBlank { null } ?: trip.vehicleNumber.ifBlank { "-" }
+
+        val cardH = 74f
+        drawRoundedCard(canvas, MARGIN, currentY, PAGE_WIDTH - (MARGIN * 2), cardH, Color.rgb(248, 250, 252), Color.rgb(226, 232, 240))
+        paint.color = Color.rgb(15, 23, 42)
+        paint.textSize = 9.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("DRIVER & VEHICLE SUMMARY", MARGIN + 12f, currentY + 16f, paint)
+        paint.color = Color.rgb(71, 85, 105)
+        paint.textSize = 9f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        canvas.drawText("Driver: $driverName   |   Driver ID: $driverId   |   Mobile: $driverPhone", MARGIN + 12f, currentY + 34f, paint)
+        canvas.drawText("Vehicle No: $vehicleNo   |   Category: $catLabel", MARGIN + 12f, currentY + 50f, paint)
+        canvas.drawText(
+            "Distance: ${String.format(Locale.US, "%.2f", breakdown.distanceKm)} km   |   Duration: ${trip.durationSeconds / 60} min",
+            MARGIN + 12f,
+            currentY + 65f,
+            paint
+        )
+
+        currentY += cardH + 14f
+
+        paint.color = Color.rgb(9, 10, 12)
+        canvas.drawRect(MARGIN, currentY, PAGE_WIDTH - MARGIN, currentY + 24f, paint)
+        paint.color = Color.rgb(255, 193, 7)
+        paint.textSize = 9.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("FARE COMPONENT", MARGIN + 12f, currentY + 16f, paint)
+        canvas.drawText("RULE", MARGIN + 220f, currentY + 16f, paint)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("AMOUNT (₹)", PAGE_WIDTH - MARGIN - 12f, currentY + 16f, paint)
+        paint.textAlign = Paint.Align.LEFT
+        currentY += 24f
+
+        val tableTopY = currentY
+        breakdown.lineItems.forEachIndexed { idx, item ->
+            drawTableRow(
+                canvas = canvas,
+                paint = paint,
+                col1 = item.label,
+                col2 = item.detail,
+                col3 = String.format(Locale.US, "%.2f", item.amount.toDouble()),
+                startX = MARGIN,
+                startY = currentY,
+                isEven = idx % 2 == 1
+            )
+            currentY += 22f
+        }
+        paint.style = Paint.Style.STROKE
+        paint.color = Color.rgb(226, 232, 240)
+        paint.strokeWidth = 1f
+        canvas.drawRect(MARGIN, tableTopY - 24f, PAGE_WIDTH - MARGIN, currentY, paint)
+        paint.style = Paint.Style.FILL
+
+        currentY += 16f
+        val summaryH = 112f
+        drawRoundedCard(canvas, MARGIN, currentY, PAGE_WIDTH - (MARGIN * 2), summaryH, Color.rgb(9, 10, 12), Color.rgb(255, 193, 7))
+        paint.color = Color.WHITE
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Customer Bill Total:", MARGIN + 14f, currentY + 24f, paint)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText(SangamTariffCalculator.formatRupees(breakdown.customerBillTotal), PAGE_WIDTH - MARGIN - 14f, currentY + 24f, paint)
+        paint.textAlign = Paint.Align.LEFT
+
+        val (ccLabel, ccAmountText) = when (val comm = breakdown.commissionResult) {
+            is SangamTariffCalculator.CommissionResult.Confirmed ->
+                "Approved CC (${comm.ruleLabel}):" to SangamTariffCalculator.formatRupees(comm.amount)
+            is SangamTariffCalculator.CommissionResult.NeedsConfirmation ->
+                "CC (Needs Confirmation):" to "${SangamTariffCalculator.formatRupees(comm.minPossibleAmount ?: java.math.BigDecimal.ZERO)}–${SangamTariffCalculator.formatRupees(comm.maxPossibleAmount ?: java.math.BigDecimal.ZERO)}"
+            is SangamTariffCalculator.CommissionResult.NotSpecified ->
+                "CC Status:" to "Not Specified"
+        }
+        paint.color = Color.rgb(255, 193, 7)
+        canvas.drawText(ccLabel, MARGIN + 14f, currentY + 48f, paint)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText(ccAmountText, PAGE_WIDTH - MARGIN - 14f, currentY + 48f, paint)
+        paint.textAlign = Paint.Align.LEFT
+
+        val balanceText = when (val bal = breakdown.driverBalanceStatus) {
+            is SangamTariffCalculator.DriverBalanceStatus.Confirmed ->
+                SangamTariffCalculator.formatRupees(bal.amount)
+            is SangamTariffCalculator.DriverBalanceStatus.RangePendingConfirmation ->
+                if (bal.minDriverBalance != null && bal.maxDriverBalance != null) {
+                    "${SangamTariffCalculator.formatRupees(bal.minDriverBalance)}–${SangamTariffCalculator.formatRupees(bal.maxDriverBalance)}"
+                } else {
+                    "Pending Confirmation"
+                }
+        }
+        paint.color = Color.rgb(34, 197, 94)
+        canvas.drawText("Driver Net Balance:", MARGIN + 14f, currentY + 72f, paint)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText(balanceText, PAGE_WIDTH - MARGIN - 14f, currentY + 72f, paint)
+        paint.textAlign = Paint.Align.LEFT
+
+        paint.color = Color.rgb(203, 213, 225)
+        paint.textSize = 9f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        canvas.drawText("GET TAXI CC GPay Number: ${SangamTariffConfig.VENDOR_GPAY_NUMBER}", MARGIN + 14f, currentY + 96f, paint)
+
+        currentY += summaryH + 16f
+        paint.color = Color.rgb(100, 116, 139)
+        paint.textSize = 8.5f
+        canvas.drawText("GET TAXI • Confidential Internal CC Settlement Report", MARGIN, currentY, paint)
     }
 
     private fun drawVendorStatementCanvas(

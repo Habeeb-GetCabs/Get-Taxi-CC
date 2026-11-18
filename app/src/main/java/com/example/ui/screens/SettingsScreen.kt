@@ -28,11 +28,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.service.LocationTrackingService
-import com.example.ui.components.SangamTariffChartDialog
 import com.example.util.AppLanguage
 import com.example.util.SangamTariffConfig
 import com.example.util.appStrings
 import com.example.viewmodel.SettingsViewModel
+import java.util.Locale
 
 private val SetBlack = Color(0xFF090A0C)
 private val SetCharcoal = Color(0xFF14171C)
@@ -60,6 +60,7 @@ fun SettingsScreen(
     val strings = appStrings()
 
     val appLanguageCode by viewModel.appLanguage.collectAsStateWithLifecycle()
+    val voiceLanguageCode by viewModel.voiceLanguage.collectAsStateWithLifecycle()
     val speedThresholdState by viewModel.speedThreshold.collectAsStateWithLifecycle()
     val audioEnabledState by viewModel.audioEnabled.collectAsStateWithLifecycle()
     val floatingBubbleEnabledState by viewModel.floatingBubbleEnabled.collectAsStateWithLifecycle()
@@ -67,11 +68,10 @@ fun SettingsScreen(
     val distanceCalibrationFactorState by viewModel.distanceCalibrationFactor.collectAsStateWithLifecycle()
 
     var speedThresholdInput by remember { mutableStateOf("") }
-    var distanceCalibrationFactorInput by remember { mutableStateOf("1.0") }
+    var distanceCalibrationFactorInput by remember { mutableStateOf("1.000") }
     var audioEnabled by remember { mutableStateOf(true) }
     var floatingBubbleEnabled by remember { mutableStateOf(true) }
     var showSavedMessage by remember { mutableStateOf(false) }
-    var showTariffDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(
         speedThresholdState,
@@ -82,7 +82,7 @@ fun SettingsScreen(
         speedThresholdInput = formatDoubleInput(speedThresholdState)
         audioEnabled = audioEnabledState
         floatingBubbleEnabled = floatingBubbleEnabledState
-        distanceCalibrationFactorInput = formatDoubleInput(distanceCalibrationFactorState)
+        distanceCalibrationFactorInput = String.format(Locale.US, "%.3f", distanceCalibrationFactorState)
     }
 
     Scaffold(
@@ -219,7 +219,58 @@ fun SettingsScreen(
                 }
             }
 
-            // AUTHORITATIVE SANGAM TARIFF REFERENCE & AMBIGUITIES CARD
+            // VOICE ANNOUNCEMENT LANGUAGE SELECTOR
+            val isVoiceTamil = AppLanguage.fromCode(voiceLanguageCode).isTamil
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SetCard),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, SetBorder),
+                modifier = Modifier.fillMaxWidth().testTag("voice_language_selector_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(38.dp).background(SetYellow, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = SetBlack)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("VOICE ANNOUNCEMENT LANGUAGE", color = SetWhite, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                            Text("Trip start & end voice prompts (English / தமிழ்)", color = SetMuted, fontSize = 11.sp)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        val isVoiceEnglish = !isVoiceTamil
+                        Button(
+                            onClick = { viewModel.updateVoiceLanguage("en") },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isVoiceEnglish) SetYellow else SetBlack,
+                                contentColor = if (isVoiceEnglish) SetBlack else SetWhite
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(48.dp).testTag("voice_language_option_en")
+                        ) {
+                            Text("English", fontWeight = FontWeight.Black)
+                        }
+                        Button(
+                            onClick = { viewModel.updateVoiceLanguage("ta") },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isVoiceTamil) SetYellow else SetBlack,
+                                contentColor = if (isVoiceTamil) SetBlack else SetWhite
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(48.dp).testTag("voice_language_option_ta")
+                        ) {
+                            Text("தமிழ்", fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+
+            // OFFLINE TARIFF ENGINE & AMBIGUITIES CARD
             Card(
                 colors = CardDefaults.cardColors(containerColor = SetBlack),
                 shape = RoundedCornerShape(20.dp),
@@ -227,26 +278,10 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth().testTag("sangam_tariff_notice_card")
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("GET TAXI • SANGAM TARIFF ENGINE", color = SetYellow, fontWeight = FontWeight.Black, fontSize = 12.sp)
-                            Text("100% Offline • Zero History • GPay ${SangamTariffConfig.VENDOR_GPAY_NUMBER}", color = SetMuted, fontSize = 11.sp)
-                        }
-                        Button(
-                            onClick = { showTariffDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = SetYellow, contentColor = SetBlack),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) {
-                            Text("VIEW RATES", fontWeight = FontWeight.Black, fontSize = 11.sp)
-                        }
-                    }
+                    Text("GET TAXI • OFFLINE TARIFF ENGINE", color = SetYellow, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                    Text("100% Offline • Zero History • CC GPay ${SangamTariffConfig.VENDOR_GPAY_NUMBER}", color = SetMuted, fontSize = 11.sp)
                     Text(
-                        text = "Flagged rules awaiting Sangam confirmation: 5 KM Min-Bill overlap, ₹60–₹75 local commission range, >25 KM vs >₹800 10% interaction, and Tempo/Urbania/Day Rental commission.",
+                        text = "Flagged rules awaiting confirmation: 5 KM Min-Bill overlap, ₹60–₹75 local CC range, >25 KM vs >₹800 10% interaction, and Day Rental CC.",
                         color = SetAmber,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -403,6 +438,7 @@ fun SettingsScreen(
                         value = speedThresholdInput,
                         onValueChange = { speedThresholdInput = it },
                         label = { Text(strings.waitSpeedThresholdLabel) },
+                        supportingText = { Text("Waiting triggers at 5 KM/h and below (<= threshold)", color = SetMuted, fontSize = 11.sp) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = darkSettingsFieldColors(),
                         modifier = Modifier.fillMaxWidth().testTag("input_speed_threshold")
@@ -438,10 +474,6 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(84.dp))
         }
-    }
-
-    if (showTariffDialog) {
-        SangamTariffChartDialog(onDismiss = { showTariffDialog = false })
     }
 }
 

@@ -398,12 +398,15 @@ class ExampleRobolectricTest {
         // MINI Local Normal 4km = 80 + 112 + 80 (outside city) = 272.00
         assertEquals(272.0, settlement.breakdown.customerBillTotal.toDouble(), 0.01)
 
-        // Generate Sangam PDF & text without persisting to Room
+        // Generate customer bill PDF & text (strictly excludes CC GPay) + internal CC report text without persisting to Room
         val pdfFile = PdfGenerator.generateSangamBillPdf(app, settlement.tripEntity, settlement.breakdown)
-        assertTrue("Generated Sangam PDF must exist", pdfFile.exists() && pdfFile.length() > 0L)
-        val receipt = ShareUtils.buildSangamReceiptText(settlement.tripEntity, settlement.breakdown, includeSettlementNote = true)
-        assertTrue(receipt.contains("9043743777"))
+        assertTrue("Generated bill PDF must exist", pdfFile.exists() && pdfFile.length() > 0L)
+        val receipt = ShareUtils.buildSangamReceiptText(settlement.tripEntity, settlement.breakdown)
+        assertFalse(receipt.contains("9043743777"))
         assertTrue(receipt.contains("₹272.00"))
+        val ccReport = ShareUtils.buildInternalCcReportText(settlement.tripEntity, settlement.breakdown)
+        assertTrue(ccReport.contains("9043743777"))
+        assertTrue(ccReport.contains("₹272.00"))
 
         // End trip & clear leaves currentSettlement null and DB trip count untouched
         viewModel.endTripAndClearSettlement()

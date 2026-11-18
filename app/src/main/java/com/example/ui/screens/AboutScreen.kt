@@ -144,7 +144,7 @@ fun AboutScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Offline Sangam Tariff Meter & Trip Settlement",
+                        text = "Digital Solutions, Business Services & Taxi Software",
                         color = Color(0xFFB45309),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
@@ -227,7 +227,7 @@ fun AboutScreen(
                     HorizontalDivider(color = Color(0xFFF1F5F9))
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // CLICKABLE OFFICIAL TELEGRAM GROUP LINK
+                    // CLICKABLE GET TAXI TELEGRAM GROUP LINK
                     Surface(
                         color = Color(0xFFF0F9FF),
                         shape = RoundedCornerShape(16.dp),
@@ -239,7 +239,7 @@ fun AboutScreen(
                                 try {
                                     val intent = Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://t.me/+KEZsC8xS2F4yNTI1")
+                                        Uri.parse("https://t.me/+dOFMD6gQOftlYTA1")
                                     )
                                     context.startActivity(intent)
                                 } catch (_: Exception) {}
@@ -266,7 +266,7 @@ fun AboutScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Telegram Group",
+                                        contentDescription = "GET TAXI Telegram Group",
                                         tint = Color.White,
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -274,15 +274,15 @@ fun AboutScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Official Telegram Group Link",
+                                        text = "GET TAXI Telegram Group",
                                         color = Color(0xFF0369A1),
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Black
                                     )
                                     Text(
-                                        text = "https://t.me/+KEZsC8xS2F4yNTI1",
+                                        text = "https://t.me/+dOFMD6gQOftlYTA1",
                                         color = Color(0xFF0F172A),
-                                        fontSize = 13.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -292,78 +292,6 @@ fun AboutScreen(
                                 contentDescription = "Open Link",
                                 tint = Color(0xFF0284C7),
                                 modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // CLICKABLE CONTACT NUMBER
-                    Surface(
-                        color = Color(0xFFECFDF5),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable {
-                                try {
-                                    val dialIntent = Intent(
-                                        Intent.ACTION_DIAL,
-                                        Uri.parse("tel:9043743777")
-                                    )
-                                    context.startActivity(dialIntent)
-                                } catch (_: Exception) {}
-                            }
-                            .testTag("about_contact_number")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF059669)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Phone,
-                                        contentDescription = "Call Contact Number",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "Contact Number",
-                                        color = Color(0xFF047857),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                    Text(
-                                        text = "9043743777",
-                                        color = Color(0xFF0F172A),
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                }
-                            }
-                            Icon(
-                                imageVector = Icons.Default.Call,
-                                contentDescription = "Open Dialer",
-                                tint = Color(0xFF059669),
-                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -463,34 +391,64 @@ fun AboutScreen(
 
                     val services = listOf(
                         ServiceItem(
-                            title = "Website development and landing pages",
-                            description = "High-converting corporate websites, bespoke landing pages, and responsive web portals optimized for speed and user engagement.",
+                            title = "Website Design & Development",
+                            description = "Custom responsive websites and business web portals engineered for speed, reliability, and mobile visitors.",
                             icon = Icons.Default.Language
                         ),
                         ServiceItem(
-                            title = "Android application development",
-                            description = "Native, rock-solid Android apps built with modern Jetpack Compose, background location tracking, and clean architecture.",
+                            title = "Android App Development",
+                            description = "Native Android applications built with Jetpack Compose, background location tracking, and clean offline-ready architecture.",
                             icon = Icons.Default.PhoneAndroid
                         ),
                         ServiceItem(
-                            title = "Billing software and business management tools",
-                            description = "Commercial invoicing, point-of-sale solutions, tariff calculation engines, and automated daily operational management tools.",
+                            title = "Billing & Business Management Software",
+                            description = "Commercial invoicing, fare/billing calculation, PDF receipt generation, and business operations management tools.",
                             icon = Icons.AutoMirrored.Filled.ReceiptLong
                         ),
                         ServiceItem(
-                            title = "Google Ads management and lead generation",
-                            description = "ROI-driven pay-per-click ad campaigns, keyword optimization, and targeted lead generation strategies for business growth.",
+                            title = "WhatsApp Automation",
+                            description = "Automated customer follow-ups, booking notifications, status alerts, and structured WhatsApp workflows.",
+                            icon = Icons.AutoMirrored.Filled.Send
+                        ),
+                        ServiceItem(
+                            title = "AI Chatbots and Business Assistants",
+                            description = "Intelligent conversational assistants and digital workflow bots for instant customer engagement and support.",
+                            icon = Icons.Default.SmartToy
+                        ),
+                        ServiceItem(
+                            title = "Google Ads Creation & Campaign Management",
+                            description = "Targeted search and local ad campaigns, keyword strategy, and conversion tracking to grow business inquiries.",
                             icon = Icons.Default.Campaign
                         ),
                         ServiceItem(
-                            title = "SEO and Google Business Profile optimization",
-                            description = "Local search dominance, Google Maps presence, on-page optimization, and organic review growth management.",
+                            title = "SEO Services",
+                            description = "Technical and on-page search engine optimization built to improve organic search rankings and local visibility.",
                             icon = Icons.Default.Search
                         ),
                         ServiceItem(
-                            title = "Hotel solutions and taxi-related software",
-                            description = "Dedicated guest transport tools, concierge dispatch systems, taxi meter solutions, and integrated hotel logistics software.",
+                            title = "Google Business Profile Management",
+                            description = "Google Maps listing optimization, service updates, and local presence management for customer discovery.",
+                            icon = Icons.Default.Storefront
+                        ),
+                        ServiceItem(
+                            title = "Custom Software Development",
+                            description = "Bespoke desktop, mobile, and utility software tailored around real-world commercial workflows.",
+                            icon = Icons.Default.Build
+                        ),
+                        ServiceItem(
+                            title = "Business Process Automation",
+                            description = "Streamlining repetitive operational tasks, reporting, and customer notifications with reliable digital systems.",
+                            icon = Icons.Default.SettingsSuggest
+                        ),
+                        ServiceItem(
+                            title = "Taxi and Transport Management Software",
+                            description = "Specialized fleet dispatch tools, commercial tariff meters, driver settlement calculators, and trip billing systems.",
                             icon = Icons.Default.LocalTaxi
+                        ),
+                        ServiceItem(
+                            title = "Landing Pages and Lead Generation",
+                            description = "Focused promotional landing pages designed for high conversion rates and qualified lead capture.",
+                            icon = Icons.Default.TrendingUp
                         )
                     )
 

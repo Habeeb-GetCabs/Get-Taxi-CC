@@ -19,24 +19,24 @@ class ExampleUnitTest {
     fun `hourly rental 5-minute grace rule boundaries`() {
         // 60:00 (3600s) -> 1 hour
         assertEquals(1L, FareCalculator.calculateBillableHours(3600L))
-        // 64:59 (3899s) -> 1 hour
-        assertEquals(1L, FareCalculator.calculateBillableHours(3899L))
-        // 65:00 (3900s) -> 2 hours
-        assertEquals(2L, FareCalculator.calculateBillableHours(3900L))
+        // 65:00 (3900s) -> 1 hour (inclusive 5-minute grace)
+        assertEquals(1L, FareCalculator.calculateBillableHours(3900L))
+        // 65:01 (3901s) -> 2 hours
+        assertEquals(2L, FareCalculator.calculateBillableHours(3901L))
 
         // 120:00 (7200s) -> 2 hours
         assertEquals(2L, FareCalculator.calculateBillableHours(7200L))
-        // 124:59 (7499s) -> 2 hours
-        assertEquals(2L, FareCalculator.calculateBillableHours(7499L))
-        // 125:00 (7500s) -> 3 hours
-        assertEquals(3L, FareCalculator.calculateBillableHours(7500L))
+        // 125:00 (7500s) -> 2 hours (inclusive 5-minute grace)
+        assertEquals(2L, FareCalculator.calculateBillableHours(7500L))
+        // 125:01 (7501s) -> 3 hours
+        assertEquals(3L, FareCalculator.calculateBillableHours(7501L))
 
         // 180:00 (10800s) -> 3 hours
         assertEquals(3L, FareCalculator.calculateBillableHours(10800L))
-        // 184:59 (11099s) -> 3 hours
-        assertEquals(3L, FareCalculator.calculateBillableHours(11099L))
-        // 185:00 (11100s) -> 4 hours
-        assertEquals(4L, FareCalculator.calculateBillableHours(11100L))
+        // 185:00 (11100s) -> 3 hours (inclusive 5-minute grace)
+        assertEquals(3L, FareCalculator.calculateBillableHours(11100L))
+        // 185:01 (11101s) -> 4 hours
+        assertEquals(4L, FareCalculator.calculateBillableHours(11101L))
     }
 
     @Test

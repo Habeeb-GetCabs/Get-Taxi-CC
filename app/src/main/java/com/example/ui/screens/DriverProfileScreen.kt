@@ -69,7 +69,7 @@ fun DriverProfileScreen(
     var mobileInput by remember { mutableStateOf("") }
     var vehicleNumberInput by remember { mutableStateOf("") }
     var vehicleModelInput by remember { mutableStateOf("") }
-    var vehicleTypeInput by remember { mutableStateOf("Sedan Taxi") }
+    var vehicleTypeInput by remember { mutableStateOf("MINI") }
     var driverIdInput by remember { mutableStateOf("") }
     var upiIdInput by remember { mutableStateOf("") }
     var photoUriString by remember { mutableStateOf<String?>(null) }
@@ -112,7 +112,7 @@ fun DriverProfileScreen(
             mobileInput = it.driverMobile
             vehicleNumberInput = it.vehicleNumber
             vehicleModelInput = it.vehicleModel
-            vehicleTypeInput = if (it.vehicleType.isNotBlank()) it.vehicleType else "Sedan Taxi"
+            vehicleTypeInput = if (it.vehicleType.isNotBlank()) it.vehicleType else "MINI"
             driverIdInput = it.driverId
             upiIdInput = it.upiId
             photoUriString = it.photoUri
@@ -193,12 +193,11 @@ fun DriverProfileScreen(
     }
 
     val vehicleTypePresets = listOf(
-        "Sedan Taxi",
-        "Hatchback Taxi",
-        "SUV Taxi",
-        "Auto Rickshaw",
-        "Van / MPV",
-        "Luxury Cab"
+        "MINI",
+        "SEDAN",
+        "SUV",
+        "SUV+",
+        "INNOVA"
     )
 
     Scaffold(

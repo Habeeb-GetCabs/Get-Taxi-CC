@@ -18,25 +18,26 @@ class FareCalculatorTest {
         assertEquals(1L, FareCalculator.calculateBillableHours(58 * 60L)) // 58 min
         assertEquals(1L, FareCalculator.calculateBillableHours(60 * 60L)) // 60:00 (3600s)
 
-        // 60:00 to 64:59 (3899s) -> still 1 billable hour (5-min grace period)
+        // 60:00 to 65:00 (3900s) -> still 1 billable hour (inclusive 5-min grace period)
         assertEquals(1L, FareCalculator.calculateBillableHours(64 * 60L + 59L)) // 64:59
+        assertEquals(1L, FareCalculator.calculateBillableHours(65 * 60L)) // 65:00 (3900s)
 
-        // 65:00 (3900s) -> crosses grace threshold into 2 billable hours
-        assertEquals(2L, FareCalculator.calculateBillableHours(65 * 60L)) // 65:00 (3900s)
+        // 65:01 (3901s) -> crosses grace threshold into 2 billable hours
+        assertEquals(2L, FareCalculator.calculateBillableHours(65 * 60L + 1L)) // 65:01 (3901s)
 
-        // 120:00 to 124:59 -> 2 billable hours
+        // 120:00 to 125:00 -> 2 billable hours
         assertEquals(2L, FareCalculator.calculateBillableHours(120 * 60L)) // 120:00 (7200s)
-        assertEquals(2L, FareCalculator.calculateBillableHours(124 * 60L + 59L)) // 124:59 (7499s)
+        assertEquals(2L, FareCalculator.calculateBillableHours(125 * 60L)) // 125:00 (7500s)
 
-        // 125:00 (7500s) -> crosses into 3 billable hours
-        assertEquals(3L, FareCalculator.calculateBillableHours(125 * 60L)) // 125:00 (7500s)
+        // 125:01 (7501s) -> crosses into 3 billable hours
+        assertEquals(3L, FareCalculator.calculateBillableHours(125 * 60L + 1L)) // 125:01 (7501s)
 
-        // 180:00 to 184:59 -> 3 billable hours
+        // 180:00 to 185:00 -> 3 billable hours
         assertEquals(3L, FareCalculator.calculateBillableHours(180 * 60L)) // 180:00 (10800s)
-        assertEquals(3L, FareCalculator.calculateBillableHours(184 * 60L + 59L)) // 184:59 (11099s)
+        assertEquals(3L, FareCalculator.calculateBillableHours(185 * 60L)) // 185:00 (11100s)
 
-        // 185:00 (11100s) -> 4 billable hours
-        assertEquals(4L, FareCalculator.calculateBillableHours(185 * 60L)) // 185:00 (11100s)
+        // 185:01 (11101s) -> 4 billable hours
+        assertEquals(4L, FareCalculator.calculateBillableHours(185 * 60L + 1L)) // 185:01 (11101s)
     }
 
     @Test
@@ -100,11 +101,11 @@ class FareCalculatorTest {
     }
 
     @Test
-    fun testHourlyRental_Test4_65min_15km() {
-        // TEST 4: Duration = exactly 65 min, Distance = 15 km
+    fun testHourlyRental_Test4_65min01s_15km() {
+        // TEST 4: Duration = 65m 01s (crosses 5-min grace), Distance = 15 km
         // Billable: 2 hrs, Included: 20 km, Extra: 0 km, Hourly: ₹700, Extra dist: ₹0, Total: ₹700
         val result = FareCalculator.calculateHourlyRentalFare(
-            durationSeconds = 65 * 60L,
+            durationSeconds = 65 * 60L + 1L,
             distanceKm = 15.0,
             hourlyRate = hourlyRate,
             includedKmPerHour = includedKmPerHour,
@@ -120,11 +121,11 @@ class FareCalculatorTest {
     }
 
     @Test
-    fun testHourlyRental_Test5_65min_25km() {
-        // TEST 5: Duration = 65 min, Distance = 25 km
+    fun testHourlyRental_Test5_65min01s_25km() {
+        // TEST 5: Duration = 65m 01s (crosses 5-min grace), Distance = 25 km
         // Billable: 2 hrs, Included: 20 km, Extra: 5 km, Hourly: ₹700, Extra dist: ₹100, Total: ₹800
         val result = FareCalculator.calculateHourlyRentalFare(
-            durationSeconds = 65 * 60L,
+            durationSeconds = 65 * 60L + 1L,
             distanceKm = 25.0,
             hourlyRate = hourlyRate,
             includedKmPerHour = includedKmPerHour,
@@ -160,11 +161,11 @@ class FareCalculatorTest {
     }
 
     @Test
-    fun testHourlyRental_Test7_125min_25km() {
-        // TEST 7: Duration = exactly 125 min, Distance = 25 km
+    fun testHourlyRental_Test7_125min01s_25km() {
+        // TEST 7: Duration = 125m 01s (crosses 5-min grace), Distance = 25 km
         // Billable: 3 hrs, Included: 30 km, Extra: 0 km, Hourly: ₹1,050, Extra dist: ₹0, Total: ₹1,050
         val result = FareCalculator.calculateHourlyRentalFare(
-            durationSeconds = 125 * 60L,
+            durationSeconds = 125 * 60L + 1L,
             distanceKm = 25.0,
             hourlyRate = hourlyRate,
             includedKmPerHour = includedKmPerHour,

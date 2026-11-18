@@ -68,11 +68,53 @@ class SettingsRepository(private val context: Context) {
         // Application Language (Default "en" = English, "ta" = Tamil)
         const val DEFAULT_APP_LANGUAGE = "en"
         val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
+
+        // TTS Voice Announcement Language ("en" = English, "ta" = Tamil)
+        const val DEFAULT_VOICE_LANGUAGE = "en"
+        val KEY_VOICE_LANGUAGE = stringPreferencesKey("voice_language")
+        private const val SYNC_PREFS_NAME = "get_taxi_voice_prefs"
+        private const val PREF_VOICE_LANGUAGE = "voice_language"
+        private const val PREF_VOICE_ENABLED = "voice_enabled"
+        private const val PREF_SPEED_THRESHOLD = "speed_threshold"
+        private const val PREF_CALIBRATION_FACTOR = "calibration_factor"
+
+        fun normalizeVoiceLanguage(code: String?): String {
+            return when (code?.trim()?.lowercase()) {
+                "ta", "ta-in", "tamil", "தமிழ்" -> "ta"
+                else -> "en"
+            }
+        }
+
+        fun getSyncVoiceLanguage(context: Context): String {
+            val prefs = context.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return normalizeVoiceLanguage(prefs.getString(PREF_VOICE_LANGUAGE, DEFAULT_VOICE_LANGUAGE))
+        }
+
+        fun isSyncAudioEnabled(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(PREF_VOICE_ENABLED, DEFAULT_AUDIO_ENABLED)
+        }
+
+        fun getSyncSpeedThreshold(context: Context): Double {
+            val prefs = context.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return java.lang.Double.longBitsToDouble(
+                prefs.getLong(PREF_SPEED_THRESHOLD, java.lang.Double.doubleToRawLongBits(DEFAULT_SPEED_THRESHOLD))
+            )
+        }
+
+        fun getSyncCalibrationFactor(context: Context): Double {
+            val prefs = context.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
+            return java.lang.Double.longBitsToDouble(
+                prefs.getLong(PREF_CALIBRATION_FACTOR, java.lang.Double.doubleToRawLongBits(DEFAULT_DISTANCE_CALIBRATION_FACTOR))
+            )
+        }
     }
 
     init {
         com.example.util.AppLanguageManager.init(context)
     }
+
+    private val syncPrefs = context.getSharedPreferences(SYNC_PREFS_NAME, Context.MODE_PRIVATE)
 
     // Application Language Flow
     val appLanguage: Flow<String> = context.dataStore.data.map { preferences ->
@@ -85,6 +127,13 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    // Voice Announcement Language Flow
+    val voiceLanguage: Flow<String> = context.dataStore.data.map { preferences ->
+        val lang = normalizeVoiceLanguage(preferences[KEY_VOICE_LANGUAGE])
+        syncPrefs.edit().putString(PREF_VOICE_LANGUAGE, lang).apply()
+        lang
+    }
+
     // Floating Speedometer Bubble Flow
     val floatingBubbleEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[KEY_FLOATING_BUBBLE_ENABLED] ?: DEFAULT_FLOATING_BUBBLE_ENABLED
@@ -92,7 +141,9 @@ class SettingsRepository(private val context: Context) {
 
     // Distance Calibration Flow
     val distanceCalibrationFactor: Flow<Double> = context.dataStore.data.map { preferences ->
-        preferences[KEY_DISTANCE_CALIBRATION_FACTOR] ?: DEFAULT_DISTANCE_CALIBRATION_FACTOR
+        val factor = preferences[KEY_DISTANCE_CALIBRATION_FACTOR] ?: DEFAULT_DISTANCE_CALIBRATION_FACTOR
+        syncPrefs.edit().putLong(PREF_CALIBRATION_FACTOR, java.lang.Double.doubleToRawLongBits(factor)).apply()
+        factor
     }
 
     // Local / Metered Flows
@@ -109,11 +160,15 @@ class SettingsRepository(private val context: Context) {
     }
 
     val speedThreshold: Flow<Double> = context.dataStore.data.map { preferences ->
-        preferences[KEY_SPEED_THRESHOLD] ?: DEFAULT_SPEED_THRESHOLD
+        val threshold = preferences[KEY_SPEED_THRESHOLD] ?: DEFAULT_SPEED_THRESHOLD
+        syncPrefs.edit().putLong(PREF_SPEED_THRESHOLD, java.lang.Double.doubleToRawLongBits(threshold)).apply()
+        threshold
     }
 
     val audioEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[KEY_AUDIO_ENABLED] ?: DEFAULT_AUDIO_ENABLED
+        val enabled = preferences[KEY_AUDIO_ENABLED] ?: DEFAULT_AUDIO_ENABLED
+        syncPrefs.edit().putBoolean(PREF_VOICE_ENABLED, enabled).apply()
+        enabled
     }
 
     val currency: Flow<String> = context.dataStore.data.map { preferences ->
@@ -182,14 +237,24 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun updateSpeedThreshold(value: Double) {
+        syncPrefs.edit().putLong(PREF_SPEED_THRESHOLD, java.lang.Double.doubleToRawLongBits(value)).apply()
         context.dataStore.edit { preferences ->
             preferences[KEY_SPEED_THRESHOLD] = value
         }
     }
 
     suspend fun updateAudioEnabled(value: Boolean) {
+        syncPrefs.edit().putBoolean(PREF_VOICE_ENABLED, value).apply()
         context.dataStore.edit { preferences ->
             preferences[KEY_AUDIO_ENABLED] = value
+        }
+    }
+
+    suspend fun updateVoiceLanguage(languageCode: String) {
+        val normalized = normalizeVoiceLanguage(languageCode)
+        syncPrefs.edit().putString(PREF_VOICE_LANGUAGE, normalized).apply()
+        context.dataStore.edit { preferences ->
+            preferences[KEY_VOICE_LANGUAGE] = normalized
         }
     }
 
@@ -279,11 +344,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun updateDistanceCalibrationFactor(value: Double?) {
+        val effective = value?.coerceIn(0.90, 1.15) ?: DEFAULT_DISTANCE_CALIBRATION_FACTOR
+        syncPrefs.edit().putLong(PREF_CALIBRATION_FACTOR, java.lang.Double.doubleToRawLongBits(effective)).apply()
         context.dataStore.edit { preferences ->
             if (value != null) {
-                // Constrain reasonable calibration factor between 0.90 and 1.15
-                val clamped = value.coerceIn(0.90, 1.15)
-                preferences[KEY_DISTANCE_CALIBRATION_FACTOR] = clamped
+                preferences[KEY_DISTANCE_CALIBRATION_FACTOR] = effective
             } else {
                 preferences.remove(KEY_DISTANCE_CALIBRATION_FACTOR)
             }
@@ -291,6 +356,10 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun resetToDefaultTariffs() {
+        syncPrefs.edit()
+            .putLong(PREF_SPEED_THRESHOLD, java.lang.Double.doubleToRawLongBits(DEFAULT_SPEED_THRESHOLD))
+            .putLong(PREF_CALIBRATION_FACTOR, java.lang.Double.doubleToRawLongBits(DEFAULT_DISTANCE_CALIBRATION_FACTOR))
+            .apply()
         context.dataStore.edit { preferences ->
             preferences[KEY_BASE_FARE] = DEFAULT_BASE_FARE
             preferences[KEY_FARE_PER_KM] = DEFAULT_FARE_PER_KM

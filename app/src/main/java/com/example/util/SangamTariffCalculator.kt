@@ -11,7 +11,7 @@ import java.math.RoundingMode
 import java.util.Locale
 
 /**
- * Deterministic, BigDecimal-backed Sangam Tariff & Vendor Settlement engine.
+ * Deterministic, BigDecimal-backed GET TAXI Offline Tariff & Driver CC Settlement engine.
  * Works 100% offline with zero invented rules for unresolved chart boundaries.
  */
 object SangamTariffCalculator {
@@ -79,6 +79,9 @@ object SangamTariffCalculator {
         val distanceKm: Double = 0.0,
         val packageHours: Int = 1,
         val waitingMinutes: Double = 0.0,
+        val durationSeconds: Long = 0L,
+        val additionalWaitingHours: Double = 0.0,
+        val additionalWaitingHourlyRate: Double = 0.0,
         val isInnovaCrysta: Boolean = false,
         val isOutsideCity: Boolean = false,
         val isNightTrip: Boolean = false,
@@ -138,10 +141,10 @@ object SangamTariffCalculator {
             )
         )
         if (outsideCharge > ZERO) {
-            lineItems.add(FareLineItem("Outside City Limits", "Sangam local extra", outsideCharge))
+            lineItems.add(FareLineItem("Outside City Limits", "Local outside-city surcharge", outsideCharge))
         }
         if (nightCharge > ZERO) {
-            lineItems.add(FareLineItem("Night Charge (11 PM–6 AM)", "Sangam local night charge", nightCharge))
+            lineItems.add(FareLineItem("Night Charge (11 PM–6 AM)", "Local night surcharge", nightCharge))
         }
         if (passThrough > ZERO) {
             lineItems.add(FareLineItem("Toll / Parking / Extras", "Additional charges", passThrough, isPassThrough = true))
@@ -217,7 +220,7 @@ object SangamTariffCalculator {
                             lineItems.add(
                                 FareLineItem(
                                     "Minimum Bill (5 KM Boundary Overlap)",
-                                    "Chart overlaps 1–5 KM (₹200) & 5–6 KM (₹250) — requires confirmation",
+                                    "Tariff overlaps 1–5 KM (₹200) & 5–6 KM (₹250) — requires confirmation",
                                     basePackageFare
                                 )
                             )
@@ -225,7 +228,7 @@ object SangamTariffCalculator {
                                 BoundaryAmbiguity(
                                     code = "MIN_BILL_5KM_OVERLAP",
                                     title = "Unconfirmed 5 KM Boundary (${category.displayName})",
-                                    description = "Sangam chart lists both 1–5 KM = ₹200 and 5–6 KM = ₹250. Exact 5.00 KM trip requires manual confirmation.",
+                                    description = "Approved tariff lists both 1–5 KM = ₹200 and 5–6 KM = ₹250. Exact 5.00 KM trip requires manual confirmation.",
                                     candidateOptions = listOf("₹200.00 (1–5 KM slab)", "₹250.00 (5–6 KM slab)")
                                 )
                             )
@@ -252,7 +255,6 @@ object SangamTariffCalculator {
                 }
             }
         } else {
-            // SUV (1-7 KM = 450, >7 KM = 200 + 35/km), SUV+ (1-10 KM = 700, >10 KM = 250 + 45/km), INNOVA (1-10 KM = 800, >10 KM = 250 + 50/km)
             if (distBd <= cfg.firstSlabMaxKm) {
                 basePackageFare = money(cfg.firstSlabAmount)
                 lineItems.add(
@@ -284,10 +286,10 @@ object SangamTariffCalculator {
         }
 
         if (outsideCharge > ZERO) {
-            lineItems.add(FareLineItem("Outside City Limits", "Sangam local extra", outsideCharge))
+            lineItems.add(FareLineItem("Outside City Limits", "Local outside-city surcharge", outsideCharge))
         }
         if (nightCharge > ZERO) {
-            lineItems.add(FareLineItem("Night Charge (11 PM–6 AM)", "Sangam local night charge", nightCharge))
+            lineItems.add(FareLineItem("Night Charge (11 PM–6 AM)", "Local night surcharge", nightCharge))
         }
         if (passThrough > ZERO) {
             lineItems.add(FareLineItem("Toll / Parking / Extras", "Additional charges", passThrough, isPassThrough = true))
@@ -312,7 +314,7 @@ object SangamTariffCalculator {
     }
 
     /**
-     * Authoritative Local Commission Evaluator.
+     * Authoritative Local CC Evaluator.
      * Preserves all unresolved chart ambiguities without inventing fixed numbers.
      */
     fun calculateLocalCommission(
@@ -327,7 +329,6 @@ object SangamTariffCalculator {
         val isAbove25Km = distBd > TWENTY_FIVE
         val isAbove800Bill = bill > EIGHT_HUNDRED
 
-        // Base distance-slab candidates
         val distanceSlabResult: CommissionResult = when {
             distBd <= FIVE -> CommissionResult.Confirmed(money("30"), "1–5 KM: ₹30")
             distBd > FIVE && distBd < SIX -> when (config.fiveToSixKmPolicy) {
@@ -340,7 +341,7 @@ object SangamTariffCalculator {
                         minPossibleAmount = money("30"),
                         maxPossibleAmount = money("75"),
                         candidateLabels = listOf("₹30.00 (1–5 KM slab)", "₹60.00–₹75.00 (6–10 KM slab)"),
-                        reason = "5–6 KM gap is not explicitly assigned in the Sangam commission chart."
+                        reason = "5–6 KM gap is not explicitly assigned in the approved CC chart."
                     )
             }
             distBd >= SIX && distBd < TEN -> evaluateSixToTenCommission(config)
@@ -365,7 +366,6 @@ object SangamTariffCalculator {
             else -> CommissionResult.Confirmed(tenPercentOfBill, "Above 25 KM: 10%")
         }
 
-        // Handle Above ₹800 bill and Above 25 KM interaction
         if (isAbove25Km || isAbove800Bill) {
             return when (config.above25KmAnd800Rule) {
                 Above25KmAnd800Rule.ALTERNATIVE_SINGLE_10_PERCENT -> {
@@ -416,7 +416,6 @@ object SangamTariffCalculator {
                             is CommissionResult.NotSpecified -> Unit
                         }
                     } else {
-                        // Only isAbove25Km (unlikely unless bill <= 800, still flag 10% vs >800 relationship)
                         possibleAmounts.add(tenPercentOfBill)
                         candidates.add("Above 25 KM: 10% = ${formatRupees(tenPercentOfBill)}")
                     }
@@ -426,9 +425,9 @@ object SangamTariffCalculator {
                         maxPossibleAmount = possibleAmounts.maxOrNull(),
                         candidateLabels = candidates,
                         reason = if (isAbove25Km && isAbove800Bill) {
-                            "Chart mentions both 'Above 25 KM: 10%' and 'Above ₹800 bill: 10%' without stating if alternative or cumulative."
+                            "Tariff mentions both 'Above 25 KM: 10%' and 'Above ₹800 bill: 10%' without stating if alternative or cumulative."
                         } else if (isAbove800Bill) {
-                            "Bill exceeds ₹800 while distance is ${String.format(Locale.US, "%.2f", distBd.toDouble())} km: chart does not clarify if 'Above ₹800: 10%' replaces or adds to distance slab."
+                            "Bill exceeds ₹800 while distance is ${String.format(Locale.US, "%.2f", distBd.toDouble())} km: does not clarify if 'Above ₹800: 10%' replaces or adds to distance slab."
                         } else {
                             "Distance exceeds 25 KM: confirm 10% rule applicability."
                         }
@@ -449,78 +448,58 @@ object SangamTariffCalculator {
                 minPossibleAmount = money("60"),
                 maxPossibleAmount = money("75"),
                 candidateLabels = listOf("Minimum ₹60.00", "Maximum ₹75.00"),
-                reason = "Sangam chart lists a ₹60–₹75 range for 6–10 KM without a fixed selection rule."
+                reason = "Approved tariff lists a ₹60–₹75 range for 6–10 KM without a fixed selection rule."
             )
         }
     }
 
+    /**
+     * Authoritative GET TAXI Hourly Rental calculation:
+     * - Customer fare: ₹350 per charged hour, 10 km/hour included, ₹20/km beyond included km
+     * - 5-minute grace after every hourly slab (durationSeconds evaluated via FareCalculator)
+     * - ZERO waiting charges even if waitingMinutes > 0
+     * - Driver CC: ₹50 per charged hour (fixed)
+     */
     fun calculateHourlyRental(
         category: VehicleCategory,
-        packageHours: Int,
+        packageHours: Int = 1,
         actualDistanceKm: Double,
-        waitingMinutes: Double = 0.0,
-        tollPermitParkingEtc: Double = 0.0
+        @Suppress("UNUSED_PARAMETER") waitingMinutes: Double = 0.0,
+        tollPermitParkingEtc: Double = 0.0,
+        durationSeconds: Long = 0L
     ): SangamSettlementBreakdown {
-        val table = SangamTariffConfig.hourlyPackageTableFor(category)
-            ?: return unsupportedCombination(category, SangamTripType.HOURLY_RENTAL)
+        val elapsedBillableHours = if (durationSeconds > 0L) {
+            FareCalculator.calculateBillableHours(durationSeconds).toInt()
+        } else {
+            1
+        }
+        val chargedHours = maxOf(packageHours.coerceAtLeast(1), elapsedBillableHours)
 
-        val clampedHours = packageHours.coerceIn(1, 12)
-        val packageAmount = money(table.getValue(clampedHours))
-        val includedKm = clampedHours * SangamTariffConfig.hourlyIncludedKmPerHour
+        val packageAmount = money(SangamTariffConfig.hourlyBaseRatePerHour.multiply(BigDecimal(chargedHours)))
+        val includedKm = chargedHours * SangamTariffConfig.hourlyIncludedKmPerHour
         val distBd = BigDecimal.valueOf(actualDistanceKm.coerceAtLeast(0.0))
         val includedKmBd = BigDecimal(includedKm)
         val extraKmBd = if (distBd > includedKmBd) distBd.subtract(includedKmBd) else BigDecimal.ZERO
 
-        val warnings = mutableListOf<String>()
-        if (packageHours !in 1..12) {
-            warnings.add("Sangam Hourly Rental chart covers 1h–12h packages; clamped ${packageHours}h to ${clampedHours}h.")
-        }
-
         val lineItems = mutableListOf(
             FareLineItem(
-                "Hourly Package (${clampedHours}h / $includedKm km)",
-                "${category.displayName} exact Sangam chart rate",
+                "Hourly Rental (${chargedHours}h / $includedKm km)",
+                "${category.displayName} • ${chargedHours} hr × ₹${SangamTariffConfig.hourlyBaseRatePerHour.toInt()}/hr (5-min grace)",
                 packageAmount
             )
         )
 
         var extraKmCharge = ZERO
-        var waitingCharge = ZERO
-
-        if (category == VehicleCategory.MINI || category == VehicleCategory.SEDAN) {
-            val extraKmRate = if (category == VehicleCategory.MINI) {
-                SangamTariffConfig.hourlyMiniExtraKmRate
-            } else {
-                SangamTariffConfig.hourlySedanExtraKmRate
-            }
-            if (extraKmBd > BigDecimal.ZERO) {
-                extraKmCharge = money(extraKmBd.multiply(extraKmRate))
-                lineItems.add(
-                    FareLineItem(
-                        "Extra Distance",
-                        "${String.format(Locale.US, "%.2f", extraKmBd.toDouble())} km × ₹${extraKmRate.toInt()}/km",
-                        extraKmCharge
-                    )
+        if (extraKmBd > BigDecimal.ZERO) {
+            val extraKmRate = SangamTariffConfig.hourlyExtraKmRate
+            extraKmCharge = money(extraKmBd.multiply(extraKmRate))
+            lineItems.add(
+                FareLineItem(
+                    "Extra Distance",
+                    "${String.format(Locale.US, "%.2f", extraKmBd.toDouble())} km × ₹${extraKmRate.toInt()}/km",
+                    extraKmCharge
                 )
-            }
-            val waitMinsBd = BigDecimal.valueOf(waitingMinutes.coerceAtLeast(0.0))
-            if (waitMinsBd > BigDecimal.ZERO) {
-                waitingCharge = money(waitMinsBd.multiply(SangamTariffConfig.hourlyMiniSedanWaitingPerMin))
-                lineItems.add(
-                    FareLineItem(
-                        "Waiting Charge",
-                        "${String.format(Locale.US, "%.1f", waitMinsBd.toDouble())} min × ₹2.08/min",
-                        waitingCharge
-                    )
-                )
-            }
-        } else {
-            if (extraKmBd > BigDecimal.ZERO) {
-                warnings.add("Extra KM (${String.format(Locale.US, "%.2f", extraKmBd.toDouble())} km over $includedKm km): Sangam chart does not define extra KM rate for ${category.displayName}.")
-            }
-            if (waitingMinutes > 0.0) {
-                warnings.add("Waiting minutes (${String.format(Locale.US, "%.1f", waitingMinutes)} min): Sangam chart does not define hourly waiting rate for ${category.displayName}.")
-            }
+            )
         }
 
         val passThrough = money(tollPermitParkingEtc.coerceAtLeast(0.0))
@@ -528,10 +507,13 @@ object SangamTariffCalculator {
             lineItems.add(FareLineItem("Toll / Parking / Extras", "Additional charges", passThrough, isPassThrough = true))
         }
 
-        val tariffSubtotal = money(packageAmount + extraKmCharge + waitingCharge)
+        val tariffSubtotal = money(packageAmount + extraKmCharge)
         val customerTotal = money(tariffSubtotal + passThrough)
-        val commissionAmt = money(tariffSubtotal.multiply(SangamTariffConfig.hourlyCommissionPercent))
-        val commission = CommissionResult.Confirmed(commissionAmt, "Hourly Rental: 10% on fare")
+        val commissionAmt = money(SangamTariffConfig.hourlyCcPerHour.multiply(BigDecimal(chargedHours)))
+        val commission = CommissionResult.Confirmed(
+            commissionAmt,
+            "Hourly Rental: ₹${SangamTariffConfig.hourlyCcPerHour.toInt()} per charged hour (${chargedHours}h)"
+        )
 
         return buildBreakdown(
             category = category,
@@ -544,7 +526,7 @@ object SangamTariffCalculator {
             lineItems = lineItems,
             commissionResult = commission,
             ambiguities = emptyList(),
-            warnings = warnings
+            warnings = emptyList()
         )
     }
 
@@ -556,7 +538,9 @@ object SangamTariffCalculator {
         tollCharge: Double = 0.0,
         permitCharge: Double = 0.0,
         parkingCharge: Double = 0.0,
-        customExtrasTotal: Double = 0.0
+        customExtrasTotal: Double = 0.0,
+        additionalWaitingHours: Double = 0.0,
+        additionalWaitingHourlyRate: Double = 0.0
     ): SangamSettlementBreakdown {
         val rate = SangamTariffConfig.outstationRates[category]
             ?: return unsupportedCombination(
@@ -571,6 +555,21 @@ object SangamTariffCalculator {
         val initial = money(rate.initialCharge)
         val distCharge = money(distBd.multiply(perKm))
         val allowance = if (over12Hours) money(SangamTariffConfig.outstationOver12HoursDriverAllowance) else ZERO
+
+        val waitHoursSafe = additionalWaitingHours.coerceAtLeast(0.0)
+        val waitRateSafe = additionalWaitingHourlyRate.coerceAtLeast(0.0)
+        val waitingCharge = if (waitHoursSafe > 0.0 && waitRateSafe > 0.0) {
+            money(BigDecimal.valueOf(waitHoursSafe).multiply(BigDecimal.valueOf(waitRateSafe)))
+        } else {
+            ZERO
+        }
+
+        val warnings = mutableListOf<String>()
+        if (waitHoursSafe > 0.0 && waitRateSafe <= 0.0) {
+            warnings.add(
+                "Additional waiting (${String.format(Locale.US, "%.2f", waitHoursSafe)} hr) recorded, but hourly waiting rate is not confirmed."
+            )
+        }
 
         val toll = money(tollCharge.coerceAtLeast(0.0))
         val permit = money(permitCharge.coerceAtLeast(0.0))
@@ -587,14 +586,23 @@ object SangamTariffCalculator {
             )
         )
         if (allowance > ZERO) {
-            lineItems.add(FareLineItem("Driver Allowance (>12 hrs)", "Sangam outstation allowance", allowance))
+            lineItems.add(FareLineItem("Driver Allowance (>12 hrs)", "Outstation driver allowance", allowance))
+        }
+        if (waitingCharge > ZERO) {
+            lineItems.add(
+                FareLineItem(
+                    "Additional Waiting Hours",
+                    "${String.format(Locale.US, "%.2f", waitHoursSafe)} hr × ₹${String.format(Locale.US, "%.2f", waitRateSafe)}/hr",
+                    waitingCharge
+                )
+            )
         }
         if (toll > ZERO) lineItems.add(FareLineItem("Toll Charges", "Pass-through extra", toll, isPassThrough = true))
         if (permit > ZERO) lineItems.add(FareLineItem("Permit Charges", "Pass-through extra", permit, isPassThrough = true))
         if (parking > ZERO) lineItems.add(FareLineItem("Parking Charges", "Pass-through extra", parking, isPassThrough = true))
         if (otherExtras > ZERO) lineItems.add(FareLineItem("Other Extras", "Pass-through extra", otherExtras, isPassThrough = true))
 
-        val tariffSubtotal = money(initial + distCharge + allowance)
+        val tariffSubtotal = money(initial + distCharge + allowance + waitingCharge)
         val customerTotal = money(tariffSubtotal + passThrough)
         val commissionAmt = money(tariffSubtotal.multiply(SangamTariffConfig.outstationCommissionPercent))
         val commission = CommissionResult.Confirmed(
@@ -613,7 +621,7 @@ object SangamTariffCalculator {
             lineItems = lineItems,
             commissionResult = commission,
             ambiguities = emptyList(),
-            warnings = emptyList()
+            warnings = warnings
         )
     }
 
@@ -670,11 +678,7 @@ object SangamTariffCalculator {
         val tariffSubtotal = money(base + distCharge + over12Charge)
         val customerTotal = money(tariffSubtotal + passThrough)
 
-        val reason = if (category.isVanOrTraveller) {
-            "Commission rate for ${category.displayName} is not specified in the Sangam chart."
-        } else {
-            "Commission rate for Day Rental is not specified in the Sangam chart."
-        }
+        val reason = "CC rate for Day Rental is not specified in the approved tariff."
 
         return buildBreakdown(
             category = category,
@@ -701,10 +705,6 @@ object SangamTariffCalculator {
             input.parkingCharge.coerceAtLeast(0.0) +
             input.customExtrasTotal.coerceAtLeast(0.0)
 
-        if (input.vehicleCategory.isVanOrTraveller && input.tripType != SangamTripType.DAY_RENTAL) {
-            return unsupportedCombination(input.vehicleCategory, input.tripType)
-        }
-
         return when (input.tripType) {
             SangamTripType.LOCAL_NORMAL -> calculateLocalNormal(
                 category = input.vehicleCategory,
@@ -726,7 +726,8 @@ object SangamTariffCalculator {
                 packageHours = input.packageHours,
                 actualDistanceKm = input.distanceKm,
                 waitingMinutes = input.waitingMinutes,
-                tollPermitParkingEtc = passThroughExtras
+                tollPermitParkingEtc = passThroughExtras,
+                durationSeconds = input.durationSeconds
             )
             SangamTripType.OUTSTATION_ONE_WAY -> calculateOutstation(
                 category = input.vehicleCategory,
@@ -736,7 +737,9 @@ object SangamTariffCalculator {
                 tollCharge = input.tollCharge,
                 permitCharge = input.permitCharge,
                 parkingCharge = input.parkingCharge,
-                customExtrasTotal = input.customExtrasTotal
+                customExtrasTotal = input.customExtrasTotal,
+                additionalWaitingHours = input.additionalWaitingHours,
+                additionalWaitingHourlyRate = input.additionalWaitingHourlyRate
             )
             SangamTripType.OUTSTATION_ROUND_TRIP -> calculateOutstation(
                 category = input.vehicleCategory,
@@ -746,7 +749,9 @@ object SangamTariffCalculator {
                 tollCharge = input.tollCharge,
                 permitCharge = input.permitCharge,
                 parkingCharge = input.parkingCharge,
-                customExtrasTotal = input.customExtrasTotal
+                customExtrasTotal = input.customExtrasTotal,
+                additionalWaitingHours = input.additionalWaitingHours,
+                additionalWaitingHourlyRate = input.additionalWaitingHourlyRate
             )
             SangamTripType.DAY_RENTAL -> calculateDayRental(
                 category = input.vehicleCategory,
@@ -816,7 +821,7 @@ object SangamTariffCalculator {
         category: VehicleCategory,
         tripType: SangamTripType
     ): SangamSettlementBreakdown {
-        val msg = "${category.displayName} only supports Day Rental in the supplied Sangam chart."
+        val msg = "${category.displayName} does not support ${tripType.displayName} in the approved tariff."
         return SangamSettlementBreakdown(
             vehicleCategory = category,
             tripType = tripType,

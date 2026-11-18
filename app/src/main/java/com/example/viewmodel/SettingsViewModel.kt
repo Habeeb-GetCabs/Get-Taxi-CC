@@ -42,6 +42,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             com.example.util.AppLanguageManager.getLanguage(application).code
         )
 
+    val voiceLanguage: StateFlow<String> = settingsRepository.voiceLanguage
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            SettingsRepository.getSyncVoiceLanguage(application)
+        )
+
     // Hourly Rental Flows
     val rentalHourlyRate: StateFlow<Double> = settingsRepository.rentalHourlyRate
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsRepository.DEFAULT_RENTAL_HOURLY_RATE)
@@ -125,6 +132,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         com.example.util.AppLanguageManager.setLanguageByCode(getApplication(), languageCode)
         viewModelScope.launch {
             settingsRepository.updateAppLanguage(languageCode)
+        }
+    }
+
+    fun updateVoiceLanguage(languageCode: String) {
+        viewModelScope.launch {
+            settingsRepository.updateVoiceLanguage(languageCode)
         }
     }
 

@@ -3,9 +3,12 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +23,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -27,12 +32,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.ui.components.VendorLogoBadge
 import com.example.util.PdfGenerator
 import com.example.util.SangamTariffCalculator
 import com.example.util.SangamTariffConfig
 import com.example.util.ShareUtils
+import com.example.util.UpiQrCodeGenerator
 import com.example.viewmodel.MeterViewModel
+import java.io.File
 import java.util.Locale
 
 private val SettleBlack = Color(0xFF090A0C)
@@ -53,6 +62,7 @@ fun TripSettlementScreen(
 ) {
     val context = LocalContext.current
     val settlement by viewModel.currentSettlement.collectAsStateWithLifecycle()
+    val driverProfile by viewModel.driverProfile.collectAsStateWithLifecycle()
 
     var showCustomerEditor by remember { mutableStateOf(false) }
     var custName by remember(settlement?.tripEntity?.tripNumber) {
@@ -236,7 +246,7 @@ fun TripSettlementScreen(
                             Icon(Icons.Default.Warning, contentDescription = null, tint = SettleAmber, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "CONFIRMATION REQUIRED (SANGAM CHART)",
+                                text = "CONFIRMATION REQUIRED (TARIFF RULE)",
                                 color = SettleAmber,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Black,
@@ -280,7 +290,7 @@ fun TripSettlementScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "SANGAM FARE BREAKDOWN",
+                        text = "APPROVED FARE BREAKDOWN",
                         color = SettleYellow,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
@@ -347,7 +357,7 @@ fun TripSettlementScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Vendor Commission", color = SettleWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Approved CC", color = SettleWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     Text(comm.ruleLabel, color = SettleMuted, fontSize = 11.sp)
                                 }
                                 Text(
@@ -451,7 +461,7 @@ fun TripSettlementScreen(
                     }
 
                     Text(
-                        text = "Pay GET TAXI Commission via GPay",
+                        text = "Pay GET TAXI CC via GPay",
                         color = SettleWhite,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Black
@@ -465,7 +475,7 @@ fun TripSettlementScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("GET TAXI GPAY NUMBER", color = SettleMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(
                                 text = SangamTariffConfig.VENDOR_GPAY_NUMBER,
@@ -476,21 +486,46 @@ fun TripSettlementScreen(
                                 modifier = Modifier.testTag("gpay_number_text")
                             )
                         }
-                        Button(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("GET TAXI GPay", SangamTariffConfig.VENDOR_GPAY_NUMBER))
-                                Toast.makeText(context, "Copied ${SangamTariffConfig.VENDOR_GPAY_NUMBER}", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = SettleYellow, contentColor = SettleBlack),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("copy_gpay_button")
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("COPY", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("GET TAXI GPay", SangamTariffConfig.VENDOR_GPAY_NUMBER))
+                                    Toast.makeText(context, "Copied ${SangamTariffConfig.VENDOR_GPAY_NUMBER}", Toast.LENGTH_SHORT).show()
+                                },
+                                border = BorderStroke(1.dp, SettleYellow),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("copy_gpay_button")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy GPay Number", tint = SettleYellow, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("COPY", color = SettleYellow, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("GET TAXI GPay", SangamTariffConfig.VENDOR_GPAY_NUMBER))
+                                    val gpayIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.nbu.paisa.user")
+                                    if (gpayIntent != null) {
+                                        gpayIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(gpayIntent)
+                                        Toast.makeText(context, "Copied ${SangamTariffConfig.VENDOR_GPAY_NUMBER} — paste in GPay", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Copied ${SangamTariffConfig.VENDOR_GPAY_NUMBER} — open GPay/UPI to Pay CC", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SettleYellow, contentColor = SettleBlack),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("pay_cc_button")
+                            ) {
+                                Text("Pay CC", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            }
                         }
                     }
 
@@ -498,9 +533,50 @@ fun TripSettlementScreen(
                         is SangamTariffCalculator.CommissionResult.Confirmed ->
                             "Send ${SangamTariffCalculator.formatRupees(comm.amount)} to ${SangamTariffConfig.VENDOR_GPAY_NUMBER} via Google Pay and confirm manually."
                         else ->
-                            "Confirm commission amount per Sangam rule before transferring via Google Pay (${SangamTariffConfig.VENDOR_GPAY_NUMBER})."
+                            "Confirm CC amount per approved rule before transferring via Google Pay (${SangamTariffConfig.VENDOR_GPAY_NUMBER})."
                     }
                     Text(text = commInstruction, color = SettleMuted, fontSize = 11.sp, lineHeight = 16.sp)
+
+                    HorizontalDivider(color = SettleBorder)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val file = PdfGenerator.generateInternalCcReportPdf(context, trip, breakdown, driverProfile)
+                                ShareUtils.sharePdf(context, file, "GET TAXI CC Report ${trip.tripNumber}")
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, SettleYellow),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("share_cc_report_pdf_button")
+                        ) {
+                            Icon(Icons.Default.Assessment, contentDescription = null, tint = SettleYellow, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("CC REPORT PDF", color = SettleYellow, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val text = ShareUtils.buildInternalCcReportText(trip, breakdown, driverProfile)
+                                ShareUtils.shareText(context, text, "GET TAXI Internal CC Report")
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, SettleBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("share_cc_report_text_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = SettleWhite, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("SHARE CC REPORT", color = SettleWhite, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                        }
+                    }
                 }
             }
 
@@ -569,6 +645,80 @@ fun TripSettlementScreen(
                             colors = settleFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+
+                    // Customer Payment QR (Driver Profile QR / UPI ID ONLY - never office CC number)
+                    val savedQrPath = driverProfile?.qrCodeUri?.takeIf { it.isNotBlank() }
+                    val savedUpiId = driverProfile?.upiId?.takeIf { it.isNotBlank() }
+                    val driverDisplayName = driverProfile?.driverName?.takeIf { it.isNotBlank() } ?: trip.driverName
+                    Surface(
+                        color = SettleBlack,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, SettleBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settlement_customer_upi_qr_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "CUSTOMER SCAN & PAY (DRIVER QR / UPI)",
+                                color = SettleYellow,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.8.sp
+                            )
+                            if (savedQrPath != null) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(if (savedQrPath.startsWith("/")) File(savedQrPath) else savedQrPath)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Driver Customer Payment QR",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .size(160.dp)
+                                        .background(SettleWhite, RoundedCornerShape(12.dp))
+                                        .padding(6.dp)
+                                )
+                            } else if (savedUpiId != null) {
+                                val upiQrBitmap: Bitmap? = remember(savedUpiId, driverDisplayName, breakdown.customerBillTotal, trip.tripNumber) {
+                                    val uri = UpiQrCodeGenerator.buildUpiUri(
+                                        upiId = savedUpiId,
+                                        driverName = driverDisplayName,
+                                        fareAmount = breakdown.customerBillTotal.toDouble(),
+                                        transactionNote = "GET TAXI ${trip.tripNumber}"
+                                    )
+                                    UpiQrCodeGenerator.generateQrCodeBitmap(uri, sizePx = 440)
+                                }
+                                if (upiQrBitmap != null) {
+                                    Image(
+                                        bitmap = upiQrBitmap.asImageBitmap(),
+                                        contentDescription = "Customer UPI Payment QR",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(160.dp)
+                                            .background(SettleWhite, RoundedCornerShape(12.dp))
+                                            .padding(6.dp)
+                                    )
+                                    Text(
+                                        text = "UPI: $savedUpiId",
+                                        color = SettleMuted,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "Add driver UPI ID or Payment QR in Profile for customer scan & pay",
+                                    color = SettleMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                     }
 
                     Row(

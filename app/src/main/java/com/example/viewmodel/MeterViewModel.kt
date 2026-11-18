@@ -13,9 +13,12 @@ import com.example.data.model.ExtraChargeItem
 import com.example.data.model.ServiceType
 import com.example.data.model.TripState
 import com.example.data.model.TripStatus
+import com.example.data.preferences.OtpValidationResult
 import com.example.data.preferences.SettingsRepository
+import com.example.data.preferences.TripOtpManager
 import com.example.data.repository.TripRepository
 import com.example.service.LocationTrackingService
+import com.example.util.FareCalculator
 import com.example.util.SangamTariffCalculator
 import com.example.util.SangamTariffConfig
 import com.example.util.SangamTariffConfig.SangamTripType
@@ -38,6 +41,7 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tripRepository: TripRepository
     private val settingsRepository: SettingsRepository
+    private val tripOtpManager: TripOtpManager
 
     val tripState: StateFlow<TripState> = LocationTrackingService.tripState
 
@@ -70,6 +74,11 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
     private val _over12Hours = MutableStateFlow(false)
     val over12Hours: StateFlow<Boolean> = _over12Hours.asStateFlow()
 
+    private val _additionalWaitingHours = MutableStateFlow(0.0)
+    val additionalWaitingHours: StateFlow<Double> = _additionalWaitingHours.asStateFlow()
+
+    val outstationWaitRate: StateFlow<Double>
+
     // Exclusive GET TAXI vendor (no multi-vendor switching in v1)
     private val _selectedVendor = MutableStateFlow(VendorLogoRenderer.defaultGetTaxiProfile())
     val selectedVendor: StateFlow<VendorProfileEntity> = _selectedVendor.asStateFlow()
@@ -99,6 +108,10 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
         val database = TripDatabase.getDatabase(application)
         tripRepository = TripRepository(database.tripDao())
         settingsRepository = SettingsRepository(application)
+        tripOtpManager = TripOtpManager(application)
+
+        outstationWaitRate = settingsRepository.outstationWaitRate
+            .stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.DEFAULT_OUTSTATION_WAIT_RATE)
 
         allTrips = tripRepository.allTrips
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -190,7 +203,7 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setPackageHours(hours: Int) {
-        val clamped = hours.coerceIn(1, 12)
+        val clamped = hours.coerceAtLeast(1)
         _packageHours.value = clamped
         val status = tripState.value.status
         if (status == TripStatus.RUNNING || status == TripStatus.PAUSED) {
@@ -203,6 +216,15 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
         val status = tripState.value.status
         if (status == TripStatus.RUNNING || status == TripStatus.PAUSED) {
             LocationTrackingService.updateActiveModifiers(over12Hours = enabled)
+        }
+    }
+
+    fun setAdditionalWaitingHours(hours: Double) {
+        val sanitized = hours.coerceAtLeast(0.0)
+        _additionalWaitingHours.value = sanitized
+        val status = tripState.value.status
+        if (status == TripStatus.RUNNING || status == TripStatus.PAUSED) {
+            LocationTrackingService.updateActiveModifiers(additionalWaitingHours = sanitized)
         }
     }
 
@@ -243,94 +265,110 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Direct Hire start: starts immediately without requiring a Trip OTP.
+     */
     fun startTrip() {
         _activeTripDisplayMode.value = ActiveTripDisplayMode.MAP_FIRST
         _manualSettlement.value = null
-
         viewModelScope.launch {
-            val category = _selectedVehicleCategory.value
-            val tripType = _selectedSangamTripType.value
-            val isCrysta = _isInnovaCrysta.value && category == VehicleCategory.INNOVA
-            val outside = _isOutsideCity.value
-            val night = _isNightTrip.value
-            val pkgHrs = _packageHours.value.coerceIn(1, 12)
-            val over12 = _over12Hours.value
-
-            val currencyVal = settingsRepository.currency.first()
-            val thresholdVal = settingsRepository.speedThreshold.first()
-            val calFactor = settingsRepository.distanceCalibrationFactor.first()
-
-            val localRate = SangamTariffConfig.localNormalRates[category]
-            val outRate = SangamTariffConfig.outstationRates[category]
-            val hourlyPkg = SangamTariffConfig.hourlyPackageTableFor(category)?.get(pkgHrs)
-            val dayRate = if (isCrysta) SangamTariffConfig.innovaCrystaDayRentalRate else SangamTariffConfig.dayRentalRates[category]
-
-            val baseVal = when (tripType) {
-                SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> localRate?.initialCharge?.toDouble() ?: 80.0
-                SangamTripType.HOURLY_RENTAL -> hourlyPkg?.toDouble() ?: 350.0
-                SangamTripType.OUTSTATION_ONE_WAY, SangamTripType.OUTSTATION_ROUND_TRIP -> outRate?.initialCharge?.toDouble() ?: 300.0
-                SangamTripType.DAY_RENTAL -> dayRate?.baseAmount?.toDouble() ?: 2000.0
-            }
-            val perKmVal = when (tripType) {
-                SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> localRate?.perKmRate?.toDouble() ?: 28.0
-                SangamTripType.HOURLY_RENTAL -> when (category) {
-                    VehicleCategory.MINI -> SangamTariffConfig.hourlyMiniExtraKmRate.toDouble()
-                    VehicleCategory.SEDAN -> SangamTariffConfig.hourlySedanExtraKmRate.toDouble()
-                    else -> 0.0
-                }
-                SangamTripType.OUTSTATION_ONE_WAY -> outRate?.oneWayPerKm?.toDouble() ?: 28.0
-                SangamTripType.OUTSTATION_ROUND_TRIP -> outRate?.roundTripPerKm?.toDouble() ?: 14.0
-                SangamTripType.DAY_RENTAL -> dayRate?.perKmRate?.toDouble() ?: 10.0
-            }
-
-            val mappedServiceType = when (tripType) {
-                SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> ServiceType.LOCAL.id
-                SangamTripType.HOURLY_RENTAL -> ServiceType.RENTAL.id
-                SangamTripType.OUTSTATION_ONE_WAY, SangamTripType.OUTSTATION_ROUND_TRIP, SangamTripType.DAY_RENTAL -> ServiceType.OUTSTATION.id
-            }
-
-            _tariffValidationMessage.value = null
-
-            LocationTrackingService.startTrip(
-                context = getApplication(),
-                baseFare = baseVal,
-                farePerKm = perKmVal,
-                waitFarePerMin = if (tripType == SangamTripType.HOURLY_RENTAL && (category == VehicleCategory.MINI || category == VehicleCategory.SEDAN)) {
-                    SangamTariffConfig.hourlyMiniSedanWaitingPerMin.toDouble()
-                } else {
-                    0.0
-                },
-                currency = currencyVal,
-                speedThreshold = thresholdVal,
-                serviceType = mappedServiceType,
-                vehicleCategoryId = category.id,
-                sangamTripTypeId = tripType.id,
-                isInnovaCrysta = isCrysta,
-                isOutOfCity = outside,
-                isNightTrip = night,
-                packageHours = pkgHrs,
-                over12Hours = over12,
-                rentalHourlyRate = hourlyPkg?.toDouble() ?: 350.0,
-                rentalIncludedKmPerHour = SangamTariffConfig.hourlyIncludedKmPerHour.toDouble(),
-                rentalMinHours = pkgHrs.toDouble(),
-                rentalExtraHrRate = 0.0,
-                rentalExtraKmRate = perKmVal,
-                outstationRatePerKm = perKmVal,
-                outstationMinFare = 0.0,
-                outstationWaitRate = 0.0,
-                outstationDriverBata = if (over12 && (tripType == SangamTripType.OUTSTATION_ONE_WAY || tripType == SangamTripType.OUTSTATION_ROUND_TRIP)) {
-                    SangamTariffConfig.outstationOver12HoursDriverAllowance.toDouble()
-                } else {
-                    0.0
-                },
-                outstationAdditionalCharges = 0.0,
-                calibrationFactor = calFactor,
-                vendorId = SangamTariffConfig.VENDOR_ID,
-                vendorName = SangamTariffConfig.VENDOR_NAME,
-                vendorContactNumber = SangamTariffConfig.VENDOR_GPAY_NUMBER
-            )
-            _hasActiveSessionBackup.value = false
+            startTripInternal()
         }
+    }
+
+    /**
+     * OTP-authorized start: validates the 4-digit OTP via TripOtpManager and starts the meter
+     * only if validation succeeds.
+     */
+    fun startTripWithOtp(enteredOtp: String, onResult: (OtpValidationResult) -> Unit) {
+        viewModelScope.launch {
+            val result = tripOtpManager.validateAndAuthorizeTrip(enteredOtp)
+            if (result is OtpValidationResult.Success) {
+                _activeTripDisplayMode.value = ActiveTripDisplayMode.MAP_FIRST
+                _manualSettlement.value = null
+                startTripInternal()
+            }
+            onResult(result)
+        }
+    }
+
+    private suspend fun startTripInternal() {
+        val category = _selectedVehicleCategory.value
+        val tripType = _selectedSangamTripType.value
+        val isCrysta = _isInnovaCrysta.value && category == VehicleCategory.INNOVA
+        val outside = _isOutsideCity.value
+        val night = _isNightTrip.value
+        val pkgHrs = _packageHours.value.coerceAtLeast(1)
+        val over12 = _over12Hours.value
+        val addWaitHrs = _additionalWaitingHours.value.coerceAtLeast(0.0)
+
+        val currencyVal = settingsRepository.currency.first()
+        val thresholdVal = settingsRepository.speedThreshold.first()
+        val calFactor = settingsRepository.distanceCalibrationFactor.first()
+        val outstationWaitRateVal = settingsRepository.outstationWaitRate.first()
+
+        val localRate = SangamTariffConfig.localNormalRates[category]
+        val outRate = SangamTariffConfig.outstationRates[category]
+        val dayRate = if (isCrysta) SangamTariffConfig.innovaCrystaDayRentalRate else SangamTariffConfig.dayRentalRates[category]
+
+        val baseVal = when (tripType) {
+            SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> localRate?.initialCharge?.toDouble() ?: 80.0
+            SangamTripType.HOURLY_RENTAL -> SangamTariffConfig.hourlyBaseRatePerHour.toDouble() * pkgHrs
+            SangamTripType.OUTSTATION_ONE_WAY, SangamTripType.OUTSTATION_ROUND_TRIP -> outRate?.initialCharge?.toDouble() ?: 300.0
+            SangamTripType.DAY_RENTAL -> dayRate?.baseAmount?.toDouble() ?: 2000.0
+        }
+        val perKmVal = when (tripType) {
+            SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> localRate?.perKmRate?.toDouble() ?: 28.0
+            SangamTripType.HOURLY_RENTAL -> SangamTariffConfig.hourlyExtraKmRate.toDouble()
+            SangamTripType.OUTSTATION_ONE_WAY -> outRate?.oneWayPerKm?.toDouble() ?: 30.0
+            SangamTripType.OUTSTATION_ROUND_TRIP -> outRate?.roundTripPerKm?.toDouble() ?: 15.0
+            SangamTripType.DAY_RENTAL -> dayRate?.perKmRate?.toDouble() ?: 10.0
+        }
+
+        val mappedServiceType = when (tripType) {
+            SangamTripType.LOCAL_NORMAL, SangamTripType.LOCAL_MINIMUM_BILL -> ServiceType.LOCAL.id
+            SangamTripType.HOURLY_RENTAL -> ServiceType.RENTAL.id
+            SangamTripType.OUTSTATION_ONE_WAY, SangamTripType.OUTSTATION_ROUND_TRIP, SangamTripType.DAY_RENTAL -> ServiceType.OUTSTATION.id
+        }
+
+        _tariffValidationMessage.value = null
+
+        LocationTrackingService.startTrip(
+            context = getApplication(),
+            baseFare = baseVal,
+            farePerKm = perKmVal,
+            waitFarePerMin = 0.0,
+            currency = currencyVal,
+            speedThreshold = thresholdVal,
+            serviceType = mappedServiceType,
+            vehicleCategoryId = category.id,
+            sangamTripTypeId = tripType.id,
+            isInnovaCrysta = isCrysta,
+            isOutOfCity = outside,
+            isNightTrip = night,
+            packageHours = pkgHrs,
+            over12Hours = over12,
+            rentalHourlyRate = SangamTariffConfig.hourlyBaseRatePerHour.toDouble(),
+            rentalIncludedKmPerHour = SangamTariffConfig.hourlyIncludedKmPerHour.toDouble(),
+            rentalMinHours = pkgHrs.toDouble(),
+            rentalExtraHrRate = SangamTariffConfig.hourlyBaseRatePerHour.toDouble(),
+            rentalExtraKmRate = SangamTariffConfig.hourlyExtraKmRate.toDouble(),
+            outstationRatePerKm = perKmVal,
+            outstationMinFare = 0.0,
+            outstationWaitRate = outstationWaitRateVal,
+            outstationDriverBata = if (over12 && (tripType == SangamTripType.OUTSTATION_ONE_WAY || tripType == SangamTripType.OUTSTATION_ROUND_TRIP)) {
+                SangamTariffConfig.outstationOver12HoursDriverAllowance.toDouble()
+            } else {
+                0.0
+            },
+            outstationAdditionalCharges = 0.0,
+            outstationAdditionalWaitingHours = addWaitHrs,
+            calibrationFactor = calFactor,
+            vendorId = SangamTariffConfig.VENDOR_ID,
+            vendorName = SangamTariffConfig.VENDOR_NAME,
+            vendorContactNumber = SangamTariffConfig.VENDOR_GPAY_NUMBER
+        )
+        _hasActiveSessionBackup.value = false
     }
 
     fun pauseTrip() {
@@ -417,8 +455,9 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
             if (input.customExtrasTotal > 0.0) extras.add(ExtraChargeItem(label = "Extra Charges", amount = input.customExtrasTotal))
 
             val durationSec = when {
+                input.durationSeconds > 0L -> input.durationSeconds
                 durationMinutes > 0L -> durationMinutes * 60L
-                input.tripType == SangamTripType.HOURLY_RENTAL -> input.packageHours * 3600L
+                input.tripType == SangamTripType.HOURLY_RENTAL -> input.packageHours.coerceAtLeast(1) * 3600L
                 else -> 0L
             }
 
@@ -485,13 +524,19 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
             outOfCitySurcharge = if (input.isOutsideCity) SangamTariffConfig.localOutsideCityCharge.toDouble() else 0.0,
             baseFare = breakdown.lineItems.firstOrNull()?.amount?.toDouble() ?: 0.0,
             farePerKm = 0.0,
-            waitFarePerMin = if (input.tripType == SangamTripType.HOURLY_RENTAL) SangamTariffConfig.hourlyMiniSedanWaitingPerMin.toDouble() else 0.0,
+            waitFarePerMin = 0.0,
             currency = SangamTariffConfig.CURRENCY_SYMBOL,
             serviceType = mappedMode,
             rentalBaseHours = input.packageHours.toDouble(),
             rentalBaseKm = SangamTariffConfig.hourlyIncludedKmPerHour.toDouble(),
-            rentalBaseFare = SangamTariffConfig.hourlyPackageTableFor(input.vehicleCategory)?.get(input.packageHours.coerceIn(1, 12))?.toDouble() ?: 0.0,
-            billableHours = input.packageHours.toLong(),
+            rentalBaseFare = SangamTariffConfig.hourlyBaseRatePerHour.toDouble(),
+            rentalExtraKmRate = SangamTariffConfig.hourlyExtraKmRate.toDouble(),
+            billableHours = if (input.tripType == SangamTripType.HOURLY_RENTAL) {
+                maxOf(input.packageHours.coerceAtLeast(1), FareCalculator.calculateBillableHours(durationSeconds).toInt()).toLong()
+            } else {
+                input.packageHours.toLong()
+            },
+            outstationWaitRate = input.additionalWaitingHourlyRate,
             outstationDriverBata = if (input.over12Hours) SangamTariffConfig.outstationOver12HoursDriverAllowance.toDouble() else 0.0,
             outstationAdditionalCharges = extrasTotal,
             extraChargesJson = ExtraChargeItem.serialize(extraItems),
@@ -535,9 +580,11 @@ class MeterViewModel(application: Application) : AndroidViewModel(application) {
         _isNightTrip.value = false
         _over12Hours.value = false
         _packageHours.value = 1
+        _additionalWaitingHours.value = 0.0
         _activeTripDisplayMode.value = ActiveTripDisplayMode.MAP_FIRST
         viewModelScope.launch {
             tripRepository.clearActiveTrip()
+            tripOtpManager.destroyTripAccessSession()
             _hasActiveSessionBackup.value = false
         }
     }

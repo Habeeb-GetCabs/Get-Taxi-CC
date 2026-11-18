@@ -5,11 +5,13 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.location.Location
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
@@ -21,6 +23,7 @@ import com.example.data.model.ExtraChargeItem
 import com.example.data.model.ServiceType
 import com.example.data.model.TripState
 import com.example.data.model.TripStatus
+import com.example.data.preferences.SettingsRepository
 import com.example.data.repository.TripRepository
 import com.example.util.AppLanguageManager
 import com.example.util.FareCalculator
@@ -46,9 +49,28 @@ class LocationTrackingService : Service() {
     private var timerJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var tts: TextToSpeech? = null
+    @Volatile
     private var isTtsInitialized = false
+    @Volatile
+    private var pendingTtsUtterance: PendingUtterance? = null
+    @Volatile
+    private var pendingStopAfterUtteranceId: String? = null
+    @Volatile
+    private var stopRequested = false
+    @Volatile
+    private var stopDbCompleted = false
+    private var stopFailsafeJob: Job? = null
+    private var lastStartAnnouncementTripKey: String = ""
+    private var lastEndAnnouncementTripKey: String = ""
     private lateinit var repository: TripRepository
     private lateinit var floatingSpeedOverlay: FloatingSpeedOverlayManager
+
+    private data class PendingUtterance(
+        val message: String,
+        val locale: Locale,
+        val utteranceId: String?,
+        val stopAfterCompletion: Boolean
+    )
 
     // Core high-accuracy GPS distance engine
     private val gpsDistanceEngine = GpsDistanceEngine()
@@ -64,6 +86,35 @@ class LocationTrackingService : Service() {
         const val TAG = "LocationTrackingService"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "get_taxi_tracking_channel"
+
+        const val VOICE_EN_START = "Your trip has started. Please fasten your seatbelt and have a safe journey."
+        const val VOICE_TA_START = "சீட் பெல்ட்டை அணிந்து பாதுகாப்பாகப் பயணம் செய்யுங்கள்."
+        const val VOICE_EN_END = "Thank you for travelling with GET TAXI. Before leaving the vehicle, please check that you have all your belongings."
+        const val VOICE_TA_END = "உங்கள் பயணத்திற்கு நன்றி. வாகனத்திலிருந்து இறங்குவதற்கு முன் உங்கள் உடைமைகளைச் சரிபார்த்துக் கொள்ளவும்."
+
+        fun getStartAnnouncement(languageCode: String): String {
+            return if (SettingsRepository.normalizeVoiceLanguage(languageCode) == "ta") {
+                VOICE_TA_START
+            } else {
+                VOICE_EN_START
+            }
+        }
+
+        fun getEndAnnouncement(languageCode: String): String {
+            return if (SettingsRepository.normalizeVoiceLanguage(languageCode) == "ta") {
+                VOICE_TA_END
+            } else {
+                VOICE_EN_END
+            }
+        }
+
+        fun getVoiceLocale(languageCode: String): Locale {
+            return if (SettingsRepository.normalizeVoiceLanguage(languageCode) == "ta") {
+                Locale.forLanguageTag("ta-IN")
+            } else {
+                Locale.US
+            }
+        }
 
         private val _tripState = MutableStateFlow(TripState())
         val tripState: StateFlow<TripState> = _tripState.asStateFlow()
@@ -123,11 +174,12 @@ class LocationTrackingService : Service() {
             rentalMinHours: Double = 1.0,
             rentalExtraHrRate: Double = 0.0,
             rentalExtraKmRate: Double = 18.0,
-            outstationRatePerKm: Double = 28.0,
+            outstationRatePerKm: Double = 30.0,
             outstationMinFare: Double = 0.0,
             outstationWaitRate: Double = 0.0,
             outstationDriverBata: Double = 0.0,
             outstationAdditionalCharges: Double = 0.0,
+            outstationAdditionalWaitingHours: Double = 0.0,
             calibrationFactor: Double = 1.0,
             vendorId: String = SangamTariffConfig.VENDOR_ID,
             vendorName: String = SangamTariffConfig.VENDOR_NAME,
@@ -165,6 +217,7 @@ class LocationTrackingService : Service() {
                 putExtra("outstationWaitRate", outstationWaitRate)
                 putExtra("outstationDriverBata", outstationDriverBata)
                 putExtra("outstationAdditionalCharges", outstationAdditionalCharges)
+                putExtra("outstationAdditionalWaitingHours", outstationAdditionalWaitingHours)
                 putExtra("calibrationFactor", calibrationFactor)
                 putExtra("vendorId", VendorLogoRenderer.GET_TAXI_VENDOR_ID)
                 putExtra("vendorName", VendorLogoRenderer.GET_TAXI_VENDOR_NAME)
@@ -351,11 +404,11 @@ class LocationTrackingService : Service() {
             val liveExtraTotal = ExtraChargeItem.totalAmount(state.extraChargeItems)
             val effectiveHours = if (tripType == SangamTariffConfig.SangamTripType.HOURLY_RENTAL) {
                 maxOf(
-                    state.packageHours.coerceIn(1, 12),
-                    FareCalculator.calculateBillableHours(state.durationSeconds).toInt().coerceIn(1, 12)
+                    state.packageHours.coerceAtLeast(1),
+                    FareCalculator.calculateBillableHours(state.durationSeconds).toInt()
                 )
             } else {
-                state.packageHours.coerceIn(1, 12)
+                state.packageHours.coerceAtLeast(1)
             }
             val effectiveOver12 = state.over12Hours || (state.durationSeconds > 12L * 3600L)
             return SangamTariffCalculator.TripCalculationInput(
@@ -364,6 +417,9 @@ class LocationTrackingService : Service() {
                 distanceKm = state.distanceKm,
                 packageHours = effectiveHours,
                 waitingMinutes = state.waitingSeconds / 60.0,
+                durationSeconds = state.durationSeconds,
+                additionalWaitingHours = state.outstationAdditionalWaitingHours,
+                additionalWaitingHourlyRate = state.outstationWaitRate,
                 isInnovaCrysta = state.isInnovaCrysta,
                 isOutsideCity = state.isOutOfCity,
                 isNightTrip = state.isNightTrip,
@@ -379,14 +435,16 @@ class LocationTrackingService : Service() {
             isOutsideCity: Boolean? = null,
             isNightTrip: Boolean? = null,
             over12Hours: Boolean? = null,
-            packageHours: Int? = null
+            packageHours: Int? = null,
+            additionalWaitingHours: Double? = null
         ) {
             val current = _tripState.value
             val updated = current.copy(
                 isOutOfCity = isOutsideCity ?: current.isOutOfCity,
                 isNightTrip = isNightTrip ?: current.isNightTrip,
                 over12Hours = over12Hours ?: current.over12Hours,
-                packageHours = (packageHours ?: current.packageHours).coerceIn(1, 12)
+                packageHours = (packageHours ?: current.packageHours).coerceAtLeast(1),
+                outstationAdditionalWaitingHours = (additionalWaitingHours ?: current.outstationAdditionalWaitingHours).coerceAtLeast(0.0)
             )
             _tripState.value = computeUpdatedStateWithFare(updated)
         }
@@ -491,11 +549,59 @@ class LocationTrackingService : Service() {
 
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
+                tts?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+
+                    override fun onDone(utteranceId: String?) {
+                        if (utteranceId != null && utteranceId == pendingStopAfterUtteranceId) {
+                            pendingStopAfterUtteranceId = null
+                            tryFinalizeServiceStop()
+                        }
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        if (utteranceId != null && utteranceId == pendingStopAfterUtteranceId) {
+                            pendingStopAfterUtteranceId = null
+                            tryFinalizeServiceStop()
+                        }
+                    }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        recordDiagnostic("TTS error (id=$utteranceId, code=$errorCode)")
+                        if (utteranceId != null && utteranceId == pendingStopAfterUtteranceId) {
+                            pendingStopAfterUtteranceId = null
+                            tryFinalizeServiceStop()
+                        }
+                    }
+                })
                 isTtsInitialized = true
                 Log.d(TAG, "TTS Initialized successfully")
+                pendingTtsUtterance?.let { queued ->
+                    pendingTtsUtterance = null
+                    speakAnnouncement(
+                        message = queued.message,
+                        locale = queued.locale,
+                        utteranceId = queued.utteranceId,
+                        stopAfterCompletion = queued.stopAfterCompletion
+                    )
+                }
             } else {
-                Log.e(TAG, "TTS Initialization failed")
+                Log.e(TAG, "TTS Initialization failed (status=$status)")
+                recordDiagnostic("TTS Initialization failed (status=$status)")
+                pendingTtsUtterance?.let { queued ->
+                    pendingTtsUtterance = null
+                    if (queued.stopAfterCompletion) {
+                        pendingStopAfterUtteranceId = null
+                        tryFinalizeServiceStop()
+                    }
+                }
             }
         }
     }
@@ -573,11 +679,12 @@ class LocationTrackingService : Service() {
                 val rExtraHr = intent.getDoubleExtra("rentalExtraHrRate", 0.0)
                 val rExtraKm = intent.getDoubleExtra("rentalExtraKmRate", 18.0)
 
-                val oRateKm = intent.getDoubleExtra("outstationRatePerKm", 28.0)
+                val oRateKm = intent.getDoubleExtra("outstationRatePerKm", 30.0)
                 val oMinFare = intent.getDoubleExtra("outstationMinFare", 0.0)
                 val oWaitRate = intent.getDoubleExtra("outstationWaitRate", 0.0)
                 val oDriverBata = intent.getDoubleExtra("outstationDriverBata", 0.0)
                 val oAddn = intent.getDoubleExtra("outstationAdditionalCharges", 0.0)
+                val oAddWaitHrs = intent.getDoubleExtra("outstationAdditionalWaitingHours", 0.0)
 
                 val vId = VendorLogoRenderer.GET_TAXI_VENDOR_ID
                 val vName = VendorLogoRenderer.GET_TAXI_VENDOR_NAME
@@ -603,6 +710,7 @@ class LocationTrackingService : Service() {
                     outstationRatePerKm = oRateKm, outstationMinFare = oMinFare,
                     outstationWaitRate = oWaitRate, outstationDriverBata = oDriverBata,
                     outstationAdditionalCharges = oAddn,
+                    outstationAdditionalWaitingHours = oAddWaitHrs,
                     calibrationFactor = calFactor,
                     vendorId = vId,
                     vendorName = vName,
@@ -728,8 +836,89 @@ class LocationTrackingService : Service() {
     }
 
     private fun announceVoice(message: String) {
+        if (!SettingsRepository.isSyncAudioEnabled(this)) return
         if (isTtsInitialized && _tripState.value.status != TripStatus.IDLE) {
+            tts?.setLanguage(Locale.US)
             tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
+        }
+    }
+
+    private fun speakAnnouncement(
+        message: String,
+        locale: Locale,
+        utteranceId: String?,
+        stopAfterCompletion: Boolean
+    ) {
+        if (!SettingsRepository.isSyncAudioEnabled(this)) {
+            if (stopAfterCompletion) {
+                pendingStopAfterUtteranceId = null
+                tryFinalizeServiceStop()
+            }
+            return
+        }
+
+        if (stopAfterCompletion) {
+            pendingStopAfterUtteranceId = utteranceId
+            stopFailsafeJob?.cancel()
+            stopFailsafeJob = serviceScope.launch {
+                delay(8000L)
+                pendingStopAfterUtteranceId = null
+                stopDbCompleted = true
+                tryFinalizeServiceStop()
+            }
+        }
+
+        if (!isTtsInitialized) {
+            pendingTtsUtterance = PendingUtterance(
+                message = message,
+                locale = locale,
+                utteranceId = utteranceId,
+                stopAfterCompletion = stopAfterCompletion
+            )
+            return
+        }
+
+        val engine = tts
+        if (engine == null) {
+            if (stopAfterCompletion) {
+                pendingStopAfterUtteranceId = null
+                tryFinalizeServiceStop()
+            }
+            return
+        }
+
+        val langResult = engine.setLanguage(locale)
+        val effectiveMessage = if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+            recordDiagnostic("TTS locale ${locale.toLanguageTag()} unavailable (code=$langResult), using English fallback")
+            engine.setLanguage(Locale.US)
+            when (message) {
+                VOICE_TA_START -> VOICE_EN_START
+                VOICE_TA_END -> VOICE_EN_END
+                else -> message
+            }
+        } else {
+            message
+        }
+
+        engine.setPitch(1.0f)
+        engine.setSpeechRate(0.95f)
+        val result = engine.speak(effectiveMessage, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result != TextToSpeech.SUCCESS) {
+            recordDiagnostic("TTS speak failed (result=$result)")
+            if (stopAfterCompletion) {
+                pendingStopAfterUtteranceId = null
+                tryFinalizeServiceStop()
+            }
+        }
+    }
+
+    private fun tryFinalizeServiceStop() {
+        if (!stopRequested || !stopDbCompleted || pendingStopAfterUtteranceId != null) return
+        stopFailsafeJob?.cancel()
+        stopFailsafeJob = null
+        serviceScope.launch(Dispatchers.Main) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 
@@ -777,6 +966,7 @@ class LocationTrackingService : Service() {
         outstationWaitRate: Double = 0.0,
         outstationDriverBata: Double = 0.0,
         outstationAdditionalCharges: Double = 0.0,
+        outstationAdditionalWaitingHours: Double = 0.0,
         calibrationFactor: Double = 1.0,
         vendorId: String = SangamTariffConfig.VENDOR_ID,
         vendorName: String = SangamTariffConfig.VENDOR_NAME,
@@ -787,6 +977,10 @@ class LocationTrackingService : Service() {
         vendorGstin: String = "",
         vendorInvoiceDetails: String = ""
     ) {
+        stopRequested = false
+        stopDbCompleted = false
+        pendingStopAfterUtteranceId = null
+        stopFailsafeJob?.cancel()
         acquireWakeLock()
 
         gpsDistanceEngine.reset(0.0)
@@ -823,7 +1017,7 @@ class LocationTrackingService : Service() {
             isInnovaCrysta = isInnovaCrysta,
             isOutOfCity = isOutOfCity,
             isNightTrip = isNightTrip,
-            packageHours = packageHours.coerceIn(1, 12),
+            packageHours = packageHours.coerceAtLeast(1),
             over12Hours = over12Hours,
             rentalHourlyRate = rentalHourlyRate,
             rentalIncludedKmPerHour = if (rentalIncludedKmPerHour > 0.0) rentalIncludedKmPerHour else 10.0,
@@ -836,6 +1030,7 @@ class LocationTrackingService : Service() {
             outstationWaitRate = outstationWaitRate,
             outstationDriverBata = outstationDriverBata,
             outstationAdditionalCharges = outstationAdditionalCharges,
+            outstationAdditionalWaitingHours = outstationAdditionalWaitingHours.coerceAtLeast(0.0),
             extraChargeItems = preAddedExtras,
             liveExtraChargesTotal = ExtraChargeItem.totalAmount(preAddedExtras),
             currentFare = 0.0,
@@ -872,10 +1067,16 @@ class LocationTrackingService : Service() {
         floatingSpeedOverlay.show()
         floatingSpeedOverlay.updateSpeed(0.0)
 
-        when (ServiceType.fromId(serviceType)) {
-            ServiceType.RENTAL -> announceVoice("Hourly rental started. Package active.")
-            ServiceType.OUTSTATION -> announceVoice("Outstation trip started. Happy journey.")
-            ServiceType.LOCAL -> announceVoice("Ride started. Meter is running.")
+        val tripKey = startTimeNow.toString()
+        if (lastStartAnnouncementTripKey != tripKey) {
+            lastStartAnnouncementTripKey = tripKey
+            val voiceLang = SettingsRepository.getSyncVoiceLanguage(this)
+            speakAnnouncement(
+                message = getStartAnnouncement(voiceLang),
+                locale = getVoiceLocale(voiceLang),
+                utteranceId = "TRIP_START_$tripKey",
+                stopAfterCompletion = false
+            )
         }
     }
 
@@ -919,7 +1120,12 @@ class LocationTrackingService : Service() {
                     repository.generateDeterministicTripNumber(record.startTime)
                 }
 
+                val savedThreshold = SettingsRepository.getSyncSpeedThreshold(this@LocationTrackingService)
+                val savedCalFactor = SettingsRepository.getSyncCalibrationFactor(this@LocationTrackingService)
+
                 gpsDistanceEngine.reset(record.distanceKm)
+                gpsDistanceEngine.speedThresholdKmH = savedThreshold
+                gpsDistanceEngine.calibrationFactor = savedCalFactor
 
                 val recoveredExtras = ExtraChargeItem.deserialize(record.extraChargesJson)
                 val recoveredSangamType = when (ServiceType.fromId(record.serviceType)) {
@@ -938,6 +1144,7 @@ class LocationTrackingService : Service() {
                     farePerKm = record.farePerKm,
                     waitFarePerMin = record.waitFarePerMin,
                     currency = record.currency,
+                    speedThreshold = savedThreshold,
                     isOutOfCity = record.isOutOfCity,
                     pickupAddress = record.pickupAddress,
                     serviceType = record.serviceType,
@@ -1015,17 +1222,19 @@ class LocationTrackingService : Service() {
                 liveExtraChargesTotal = 0.0
             )
 
-            val tamilMessage = "உங்கள் பயணத்திற்கு நன்றி. இந்த நாள் இனிய நாளாக அமையட்டும். இறங்குவதற்கு முன் உங்கள் உடைமைகளைச் சரிபார்த்துக் கொள்ளவும். நன்றி."
-            if (isTtsInitialized) {
-                val taLocale = Locale.forLanguageTag("ta-IN")
-                val langResult = tts?.setLanguage(taLocale)
-                if (langResult != TextToSpeech.LANG_MISSING_DATA && langResult != TextToSpeech.LANG_NOT_SUPPORTED) {
-                    tts?.setPitch(1.1f)
-                    tts?.setSpeechRate(0.95f)
-                }
-                tts?.speak(tamilMessage, TextToSpeech.QUEUE_FLUSH, null, "TRIP_FINISH")
-            } else {
-                announceVoice("Ride completed. Total fare ${currentState.currency}${String.format(Locale.US, "%.2f", currentState.currentFare)}")
+            val tripKey = currentState.startTime.toString()
+            stopRequested = true
+            stopDbCompleted = false
+            val shouldSpeakEnd = lastEndAnnouncementTripKey != tripKey
+            if (shouldSpeakEnd) {
+                lastEndAnnouncementTripKey = tripKey
+                val voiceLang = SettingsRepository.getSyncVoiceLanguage(this)
+                speakAnnouncement(
+                    message = getEndAnnouncement(voiceLang),
+                    locale = getVoiceLocale(voiceLang),
+                    utteranceId = "TRIP_FINISH_$tripKey",
+                    stopAfterCompletion = true
+                )
             }
             recordDiagnostic("Ride completed: ${currentState.tripNumber}, Final distance: ${String.format(Locale.US, "%.2f", currentState.distanceKm)} km")
 
@@ -1123,6 +1332,8 @@ class LocationTrackingService : Service() {
                 )
                 repository.clearActiveTrip()
                 Log.d(TAG, "Completed trip $finalTripNum prepared for transient settlement (no permanent history saved)")
+                stopDbCompleted = true
+                tryFinalizeServiceStop()
             }
 
             userExplicitlyStartedTrip = false
@@ -1130,8 +1341,6 @@ class LocationTrackingService : Service() {
             stopTimers()
             releaseWakeLock()
             floatingSpeedOverlay.hide()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
     }
 
@@ -1340,7 +1549,10 @@ class LocationTrackingService : Service() {
                     val nextElapsed = state.durationSeconds + 1
 
                     var nextWait = state.waitingSeconds
-                    val isMoving = state.isMoving || state.speedKmH >= state.speedThreshold
+                    val currentTimeMs = System.currentTimeMillis()
+                    val hasRecentGps = lastLocationCallbackTimestamp > 0L && (currentTimeMs - lastLocationCallbackTimestamp <= 5000L)
+                    val effectiveSpeed = if (hasRecentGps) state.speedKmH else 0f
+                    val isMoving = hasRecentGps && effectiveSpeed > state.speedThreshold
                     if (!isMoving) {
                         nextWait += 1
                     }
@@ -1348,6 +1560,8 @@ class LocationTrackingService : Service() {
                     _tripState.value = state.copy(
                         durationSeconds = nextElapsed,
                         waitingSeconds = nextWait,
+                        speedKmH = effectiveSpeed,
+                        isMoving = isMoving,
                         isWaitingPaused = isMoving
                     )
 
@@ -1482,7 +1696,7 @@ class LocationTrackingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_taxi)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)

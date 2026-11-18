@@ -108,8 +108,8 @@ class TripOtpManagerTest {
     }
 
     @Test
-    fun `test 5 permanent OTPs work repeatedly without expiring or being consumed`() = runBlocking {
-        assertEquals(5, TripOtpManager.PERMANENT_OTPS.size)
+    fun `test 8 permanent OTPs work repeatedly without expiring or being consumed`() = runBlocking {
+        assertEquals(8, TripOtpManager.PERMANENT_OTPS.size)
 
         for (permanentOtp in TripOtpManager.PERMANENT_OTPS) {
             // First trip with this permanent OTP

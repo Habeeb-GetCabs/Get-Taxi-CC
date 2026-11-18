@@ -48,10 +48,10 @@ class TripOtpManager(private val context: Context) {
         const val CUSTOMER_OTP_MESSAGE = "Please share your trip OTP with the driver before starting your journey."
 
         /**
-         * 20 permanent, easy-to-note 4-digit Trip OTP codes that can be shared with
+         * 8 permanent, easy-to-note 4-digit Trip OTP codes that can be shared with
          * drivers and customers at any time. Reusable, no burn/expiration, no backend needed.
          */
-        val PERMANENT_OTPS: List<String> = listOf("1981", "1974", "1983", "1984", "2002")
+        val PERMANENT_OTPS: List<String> = listOf("1974", "1981", "1983", "1984", "2002", "2005", "2009", "2016")
     }
 
     /**

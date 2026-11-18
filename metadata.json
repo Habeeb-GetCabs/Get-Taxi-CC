@@ -1,6 +1,6 @@
 {
   "name": "GET TAXI",
-  "description": "Offline-first GET TAXI commercial taxi meter and Sangam tariff fare & vendor settlement calculator.",
+  "description": "Offline-first GET TAXI commercial taxi meter, fare calculator, and driver CC settlement app.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

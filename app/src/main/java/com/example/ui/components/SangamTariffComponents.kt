@@ -168,14 +168,6 @@ fun SangamTripTypeSelectorCard(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.2.sp
                 )
-                if (selectedCategory.isVanOrTraveller) {
-                    Text(
-                        text = "DAY RENTAL ONLY",
-                        color = WarningAmber,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -270,10 +262,13 @@ fun SangamModifiersAndRatePreviewCard(
     isNightTrip: Boolean,
     packageHours: Int,
     over12Hours: Boolean,
+    additionalWaitingHours: Double = 0.0,
+    outstationWaitRate: Double = 0.0,
     onToggleOutsideCity: (Boolean) -> Unit,
     onToggleNightTrip: (Boolean) -> Unit,
     onSelectPackageHours: (Int) -> Unit,
-    onToggleOver12Hours: (Boolean) -> Unit
+    onToggleOver12Hours: (Boolean) -> Unit,
+    onUpdateAdditionalWaitingHours: (Double) -> Unit = {}
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MeterCharcoalCard),
@@ -286,7 +281,7 @@ fun SangamModifiersAndRatePreviewCard(
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "SANGAM ACTIVE TARIFF & MODIFIERS",
+                text = "ACTIVE TARIFF & MODIFIERS",
                 color = TaxiYellow,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
@@ -332,23 +327,24 @@ fun SangamModifiersAndRatePreviewCard(
 
                 SangamTripType.HOURLY_RENTAL -> {
                     Spacer(modifier = Modifier.height(10.dp))
-                    val pkgAmt = SangamTariffConfig.hourlyPackageTableFor(category)?.get(packageHours)
+                    val safeHours = packageHours.coerceAtLeast(1)
+                    val pkgAmt = SangamTariffConfig.hourlyBaseRatePerHour.toInt() * safeHours
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Package: ${packageHours}h / ${packageHours * 10} km",
+                                text = "Package: ${safeHours}h / ${safeHours * SangamTariffConfig.hourlyIncludedKmPerHour} km",
                                 color = TextWhite,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Chart Fee: ${pkgAmt?.let { SangamTariffCalculator.formatRupees(it) } ?: "N/A"}",
+                                text = "Base Fee: ₹$pkgAmt • 5-min grace • Zero wait",
                                 color = TaxiYellow,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }
@@ -357,8 +353,8 @@ fun SangamModifiersAndRatePreviewCard(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             OutlinedButton(
-                                onClick = { if (packageHours > 1) onSelectPackageHours(packageHours - 1) },
-                                enabled = packageHours > 1,
+                                onClick = { if (safeHours > 1) onSelectPackageHours(safeHours - 1) },
+                                enabled = safeHours > 1,
                                 shape = RoundedCornerShape(12.dp),
                                 border = BorderStroke(1.dp, MeterBorder),
                                 contentPadding = PaddingValues(0.dp),
@@ -369,14 +365,13 @@ fun SangamModifiersAndRatePreviewCard(
                                 Text("−", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Black)
                             }
                             Text(
-                                text = "${packageHours}h",
+                                text = "${safeHours}h",
                                 color = TaxiYellow,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
                             OutlinedButton(
-                                onClick = { if (packageHours < 12) onSelectPackageHours(packageHours + 1) },
-                                enabled = packageHours < 12,
+                                onClick = { onSelectPackageHours(safeHours + 1) },
                                 shape = RoundedCornerShape(12.dp),
                                 border = BorderStroke(1.dp, TaxiYellow),
                                 contentPadding = PaddingValues(0.dp),
@@ -399,20 +394,61 @@ fun SangamModifiersAndRatePreviewCard(
                         testTag = "chip_over_12_hours",
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
-
-                SangamTripType.DAY_RENTAL -> {
-                    if (category.isVanOrTraveller) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        ModifierToggleChip(
-                            label = "After 12 Hours Extra +₹500",
-                            checked = over12Hours,
-                            onToggle = { onToggleOver12Hours(!over12Hours) },
-                            testTag = "chip_after_12_hours_van",
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                    if (outstationWaitRate > 0.0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Manual Extra Waiting Hours (Optional)",
+                                    color = TextWhite,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Configured Wait Rate: ₹${String.format(Locale.US, "%.0f", outstationWaitRate)}/hr",
+                                    color = TextMuted,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onUpdateAdditionalWaitingHours((additionalWaitingHours - 1.0).coerceAtLeast(0.0)) },
+                                    enabled = additionalWaitingHours > 0.0,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, MeterBorder),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(48.dp).testTag("outstation_wait_hours_minus")
+                                ) {
+                                    Text("−", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                                }
+                                Text(
+                                    text = "${String.format(Locale.US, "%.1f", additionalWaitingHours)}h",
+                                    color = TaxiYellow,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                OutlinedButton(
+                                    onClick = { onUpdateAdditionalWaitingHours(additionalWaitingHours + 1.0) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, TaxiYellow),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(48.dp).testTag("outstation_wait_hours_plus")
+                                ) {
+                                    Text("+", color = TaxiYellow, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
                     }
                 }
+
+                SangamTripType.DAY_RENTAL -> Unit
             }
         }
     }
@@ -483,29 +519,23 @@ private fun buildRateSummaryText(
                     "Min Bill: 1–10 KM ₹700 | >10 KM ₹250 + ₹45/km"
                 VehicleCategory.INNOVA ->
                     "Min Bill: 1–10 KM ₹800 | >10 KM ₹250 + ₹50/km"
-                else -> "Not applicable for ${category.displayName}"
             }
         }
         SangamTripType.HOURLY_RENTAL -> {
-            val table = SangamTariffConfig.hourlyPackageTableFor(category)
-            val amt = table?.get(packageHours)
-            val extra = when (category) {
-                VehicleCategory.MINI -> "Extra ₹18/km • Wait ₹2.08/min • 10% comm."
-                VehicleCategory.SEDAN -> "Extra ₹20/km • Wait ₹2.08/min • 10% comm."
-                else -> "10 km/hr included • 10% comm."
-            }
-            "Hourly ${packageHours}h (${packageHours * 10} km): ₹${amt?.toInt() ?: 0} • $extra"
+            val hrs = packageHours.coerceAtLeast(1)
+            val amt = SangamTariffConfig.hourlyBaseRatePerHour.toInt() * hrs
+            "Hourly ${hrs}h (${hrs * SangamTariffConfig.hourlyIncludedKmPerHour} km): ₹$amt (₹350/hr) • Extra ₹20/km • 5-min grace • Zero wait • CC ₹50/hr"
         }
         SangamTripType.OUTSTATION_ONE_WAY -> {
             val r = SangamTariffConfig.outstationRates[category]
             if (r != null) {
-                "One-Way: ₹${r.initialCharge.toInt()} initial + ₹${r.oneWayPerKm.toInt()}/km • >12h ₹400 • 10% comm."
+                "One-Way: ₹${r.initialCharge.toInt()} initial + ₹${r.oneWayPerKm.toInt()}/km • >12h ₹400 • CC 10%"
             } else "Not applicable"
         }
         SangamTripType.OUTSTATION_ROUND_TRIP -> {
             val r = SangamTariffConfig.outstationRates[category]
             if (r != null) {
-                "Round-Trip: ₹${r.initialCharge.toInt()} initial + ₹${r.roundTripPerKm.toInt()}/km • >12h ₹400 • 10% comm."
+                "Round-Trip: ₹${r.initialCharge.toInt()} initial + ₹${r.roundTripPerKm.toInt()}/km • >12h ₹400 • CC 10%"
             } else "Not applicable"
         }
         SangamTripType.DAY_RENTAL -> {
@@ -515,8 +545,7 @@ private fun buildRateSummaryText(
                 SangamTariffConfig.dayRentalRates[category]
             }
             if (r != null) {
-                val extra12 = if (r.after12HoursExtra.toInt() > 0) " • >12h +₹${r.after12HoursExtra.toInt()}" else ""
-                "Day Rental: ₹${r.baseAmount.toInt()} + ₹${r.perKmRate.toInt()}/km$extra12"
+                "Day Rental: ₹${r.baseAmount.toInt()} + ₹${r.perKmRate.toInt()}/km"
             } else "Not available"
         }
     }
@@ -531,6 +560,7 @@ fun QuickFareCalculatorDialog(
     initialNightTrip: Boolean,
     initialPackageHours: Int,
     initialOver12Hours: Boolean,
+    outstationWaitRate: Double = 0.0,
     onDismiss: () -> Unit,
     onCalculateAndSettle: (
         input: SangamTariffCalculator.TripCalculationInput,
@@ -541,8 +571,9 @@ fun QuickFareCalculatorDialog(
 ) {
     var distanceInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("") }
-    var waitingMinsInput by remember { mutableStateOf("0") }
-    var hoursInput by remember { mutableIntStateOf(initialPackageHours.coerceIn(1, 12)) }
+    var hourlyExtraMinutesInput by remember { mutableStateOf("0") }
+    var outstationWaitHoursInput by remember { mutableStateOf("") }
+    var hoursInput by remember { mutableIntStateOf(initialPackageHours.coerceAtLeast(1)) }
     var outsideCity by remember { mutableStateOf(initialOutsideCity) }
     var nightTrip by remember { mutableStateOf(initialNightTrip) }
     var over12Hrs by remember { mutableStateOf(initialOver12Hours) }
@@ -615,7 +646,19 @@ fun QuickFareCalculatorDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Package Hours: ${hoursInput}h (${hoursInput * 10} km)", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Hours: ${hoursInput}h (${hoursInput * SangamTariffConfig.hourlyIncludedKmPerHour} km)",
+                                color = TextWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "₹350/hr • 5-min grace • Zero waiting",
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { if (hoursInput > 1) hoursInput-- },
@@ -623,23 +666,21 @@ fun QuickFareCalculatorDialog(
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text("−", color = TextWhite) }
                             OutlinedButton(
-                                onClick = { if (hoursInput < 12) hoursInput++ },
+                                onClick = { hoursInput++ },
                                 modifier = Modifier.size(48.dp),
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text("+", color = TaxiYellow) }
                         }
                     }
 
-                    if (initialCategory == VehicleCategory.MINI || initialCategory == VehicleCategory.SEDAN) {
-                        OutlinedTextField(
-                            value = waitingMinsInput,
-                            onValueChange = { waitingMinsInput = it },
-                            label = { Text("Waiting Minutes (₹2.08/min)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            colors = darkFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    OutlinedTextField(
+                        value = hourlyExtraMinutesInput,
+                        onValueChange = { hourlyExtraMinutesInput = it },
+                        label = { Text("Extra Minutes (0–59, 5-min grace per slab)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = darkFieldColors(),
+                        modifier = Modifier.fillMaxWidth().testTag("quick_calc_hourly_extra_minutes")
+                    )
                 } else {
                     OutlinedTextField(
                         value = durationInput,
@@ -671,15 +712,34 @@ fun QuickFareCalculatorDialog(
                 }
 
                 if (initialTripType == SangamTripType.OUTSTATION_ONE_WAY ||
-                    initialTripType == SangamTripType.OUTSTATION_ROUND_TRIP ||
-                    (initialTripType == SangamTripType.DAY_RENTAL && initialCategory.isVanOrTraveller)
+                    initialTripType == SangamTripType.OUTSTATION_ROUND_TRIP
                 ) {
                     ModifierToggleChip(
-                        label = if (initialCategory.isVanOrTraveller) "After 12 Hours +₹500" else ">12 Hours Allowance +₹400",
+                        label = ">12 Hours Allowance +₹400",
                         checked = over12Hrs,
                         onToggle = { over12Hrs = !over12Hrs },
                         testTag = "quick_calc_over_12",
                         modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = outstationWaitHoursInput,
+                        onValueChange = { outstationWaitHoursInput = it },
+                        label = { Text("Additional Waiting Hours (Optional)") },
+                        supportingText = {
+                            Text(
+                                text = if (outstationWaitRate > 0.0) {
+                                    "Configured wait rate: ₹${String.format(Locale.US, "%.0f", outstationWaitRate)}/hr"
+                                } else {
+                                    "Outstation hourly wait rate not configured (no auto charge)"
+                                },
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = darkFieldColors(),
+                        modifier = Modifier.fillMaxWidth().testTag("quick_calc_outstation_wait_hours")
                     )
                 }
 
@@ -734,12 +794,22 @@ fun QuickFareCalculatorDialog(
                             errorMsg = "Enter valid distance in KM"
                             return@Button
                         }
+                        val extraMins = hourlyExtraMinutesInput.trim().toLongOrNull()?.coerceIn(0L, 59L) ?: 0L
+                        val computedDurationSec = if (initialTripType == SangamTripType.HOURLY_RENTAL) {
+                            (hoursInput.coerceAtLeast(1) * 3600L) + (extraMins * 60L)
+                        } else {
+                            (durationInput.trim().toLongOrNull() ?: 0L) * 60L
+                        }
+                        val waitHours = outstationWaitHoursInput.trim().toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
                         val input = SangamTariffCalculator.TripCalculationInput(
                             vehicleCategory = initialCategory,
                             tripType = initialTripType,
                             distanceKm = dist,
-                            packageHours = hoursInput,
-                            waitingMinutes = waitingMinsInput.trim().toDoubleOrNull() ?: 0.0,
+                            packageHours = hoursInput.coerceAtLeast(1),
+                            waitingMinutes = 0.0,
+                            durationSeconds = computedDurationSec,
+                            additionalWaitingHours = waitHours,
+                            additionalWaitingHourlyRate = outstationWaitRate,
                             isInnovaCrysta = initialInnovaCrysta && initialCategory == VehicleCategory.INNOVA,
                             isOutsideCity = outsideCity,
                             isNightTrip = nightTrip,
@@ -748,7 +818,11 @@ fun QuickFareCalculatorDialog(
                             permitCharge = permitInput.trim().toDoubleOrNull() ?: 0.0,
                             parkingCharge = parkingInput.trim().toDoubleOrNull() ?: 0.0
                         )
-                        val durMin = durationInput.trim().toLongOrNull() ?: 0L
+                        val durMin = if (initialTripType == SangamTripType.HOURLY_RENTAL) {
+                            computedDurationSec / 60L
+                        } else {
+                            durationInput.trim().toLongOrNull() ?: 0L
+                        }
                         onCalculateAndSettle(input, pickupInput.trim(), dropInput.trim(), durMin)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = TaxiYellow, contentColor = MeterBlack),
@@ -766,7 +840,7 @@ fun QuickFareCalculatorDialog(
 }
 
 @Composable
-fun SangamTariffChartDialog(onDismiss: () -> Unit) {
+fun GetTaxiTariffDetailsDialog(onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
             colors = CardDefaults.cardColors(containerColor = MeterCharcoal),
@@ -775,7 +849,7 @@ fun SangamTariffChartDialog(onDismiss: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 650.dp)
-                .testTag("sangam_tariff_chart_dialog")
+                .testTag("get_taxi_tariff_details_dialog")
         ) {
             Column(
                 modifier = Modifier
@@ -789,7 +863,7 @@ fun SangamTariffChartDialog(onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "SANGAM TARIFF REFERENCE",
+                        text = "GET TAXI TARIFF DETAILS",
                         color = TaxiYellow,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Black
@@ -808,28 +882,27 @@ fun SangamTariffChartDialog(onDismiss: () -> Unit) {
                         "• Extras: Outside city ₹80 | Night (11PM–6AM) ₹50"
                 )
                 ReferenceBlock(
-                    title = "2. Local Commission",
+                    title = "2. Local CC Structure",
                     body = "1–5 KM: ₹30 | 6–10 KM: ₹60–₹75 | 10–25 KM: ₹80 | >25 KM: 10% | >₹800 bill: 10%"
                 )
                 ReferenceBlock(
-                    title = "3. Hourly Rental (1h–12h, 10 km/hr)",
-                    body = "• MINI: 1h ₹350 .. 4h ₹1300 .. 8h ₹2600 .. 12h ₹3900 (+₹18/km, Wait ₹2.08/min)\n" +
-                        "• SEDAN: 1h ₹375 .. 4h ₹1400 .. 8h ₹2800 .. 12h ₹4200 (+₹20/km, Wait ₹2.08/min)\n" +
-                        "• SUV: 1–2h ₹1000, 3h ₹1275..12h ₹5100 | SUV+: 1–2h ₹1100, 3h ₹1350..12h ₹5400\n" +
-                        "• INNOVA: 1–2h ₹1200, 3h ₹1425..12h ₹5700 | Comm: 10%"
+                    title = "3. Hourly Rental (GET TAXI Standard)",
+                    body = "• Customer Fare: ₹350 per charged hour • 10 km included per hour\n" +
+                        "• Additional Distance: ₹20/km beyond included allowance\n" +
+                        "• Grace Period: 5 minutes after every hourly slab (zero waiting charges)\n" +
+                        "• Driver CC: ₹50 per charged hour (fixed)"
                 )
                 ReferenceBlock(
                     title = "4. Outstation & Day Rental",
-                    body = "• One-Way / Round: MINI ₹300+28/14 | SEDAN ₹300+28/15 | SUV ₹400+35/17 | SUV+ ₹400+36/18 | INNOVA ₹400+40/20 (>12h +₹400, Comm 10%)\n" +
-                        "• Day Rental: MINI/SEDAN ₹2000+10/km | SUV ₹2300+13/km | SUV+ ₹2400+14/km | INNOVA ₹2500+15/km | CRYSTA ₹3000+16/km\n" +
-                        "• Tempo 12–14 ₹3500+18 | Tempo 16–18 ₹4000+20 | Urbania 12–14 ₹5000+28 | Urbania 16–18 ₹6000+30 (>12h +₹500)"
+                    body = "• One-Way / Round-Trip: MINI ₹300+30/15 | SEDAN ₹300+30/15 | SUV ₹400+35/17 | SUV+ ₹400+36/18 | INNOVA ₹400+40/20 (>12h +₹400, CC 10%)\n" +
+                        "• Day Rental: MINI/SEDAN ₹2000+10/km | SUV ₹2300+13/km | SUV+ ₹2400+14/km | INNOVA ₹2500+15/km | CRYSTA ₹3000+16/km"
                 )
                 ReferenceBlock(
-                    title = "Unresolved Rules Flagged for Sangam Confirmation",
+                    title = "Items Flagged for Confirmation",
                     body = "1) Exact 5.0 KM MINI/SEDAN min-bill overlap (₹200 vs ₹250)\n" +
-                        "2) Local commission 6–10 KM range (₹60–₹75) & 5–6 / 10 KM boundaries\n" +
+                        "2) Local CC 6–10 KM range (₹60–₹75) & 5–6 / 10 KM boundaries\n" +
                         "3) >25 KM (10%) vs >₹800 bill (10%) alternative vs cumulative\n" +
-                        "4) Missing commission rate for Day Rental, Tempo Traveller & Force Urbania",
+                        "4) Missing Day Rental CC rate & optional Outstation waiting-hour ₹ rate",
                     accentColor = WarningAmber
                 )
             }
@@ -846,13 +919,23 @@ private fun ReferenceBlock(
     Surface(
         color = MeterBlack,
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MeterBorder),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = title, color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = title,
+                color = accentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = body, color = TextWhite, fontSize = 11.sp, lineHeight = 16.sp)
+            Text(
+                text = body,
+                color = TextWhite,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }

@@ -43,22 +43,22 @@ object FareCalculator {
 
     /**
      * Calculates billable hourly slabs based on the mandatory 5-minute grace rule:
-     * - First Hour: 00:00 through 01:04:59 (0 - 3899s) -> 1 billable hour
-     * - Second Hour: 01:05:00 through 02:04:59 (3900 - 7499s) -> 2 billable hours
-     * - Third Hour: 02:05:00 through 03:04:59 (7500 - 11099s) -> 3 billable hours
-     * - Fourth Hour: 03:05:00 through 04:04:59 (11100 - 14699s) -> 4 billable hours
+     * - First Hour: 00:00 through 01:05:00 (0 - 3900s) -> 1 billable hour
+     * - Second Hour: 01:05:01 through 02:05:00 (3901 - 7500s) -> 2 billable hours
+     * - Third Hour: 02:05:01 through 03:05:00 (7501 - 11100s) -> 3 billable hours
+     * - Fourth Hour: 03:05:01 through 04:05:00 (11101 - 14700s) -> 4 billable hours
      * - And so on.
      *
      * Boundary examples:
      *  60:00 (3600s) -> 1 hour
-     *  64:59 (3899s) -> 1 hour
-     *  65:00 (3900s) -> 2 hours
+     *  65:00 (3900s) -> 1 hour (within 5-minute grace)
+     *  65:01 (3901s) -> 2 hours
      * 120:00 (7200s) -> 2 hours
-     * 124:59 (7499s) -> 2 hours
-     * 125:00 (7500s) -> 3 hours
+     * 125:00 (7500s) -> 2 hours (within 5-minute grace)
+     * 125:01 (7501s) -> 3 hours
      * 180:00 (10800s) -> 3 hours
-     * 184:59 (11099s) -> 3 hours
-     * 185:00 (11100s) -> 4 hours
+     * 185:00 (11100s) -> 3 hours (within 5-minute grace)
+     * 185:01 (11101s) -> 4 hours
      */
     fun calculateBillableHours(durationSeconds: Long): Long {
         if (durationSeconds <= 0L) return 1L
@@ -68,11 +68,11 @@ object FareCalculator {
         return if (hours == 0L) {
             1L
         } else {
-            if (remSec >= 300L) {
-                // Past the 5-minute grace window (>= 300 seconds), jumps to next billable hour slab
+            if (remSec > 300L) {
+                // Strictly past the 5-minute grace window (> 300 seconds), jumps to next billable hour slab
                 hours + 1L
             } else {
-                // Within the 5-minute grace window
+                // Within the 5-minute grace window (inclusive of exact 5:00 / 300s)
                 hours
             }
         }

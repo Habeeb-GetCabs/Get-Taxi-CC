@@ -55,9 +55,10 @@ data class TripState(
     val rentalHourlyCharge: Double = 0.0,
     val rentalExtraDistanceCharge: Double = 0.0,
     // Outstation
-    val outstationRatePerKm: Double = 28.0,
+    val outstationRatePerKm: Double = 30.0,
     val outstationMinFare: Double = 0.0,
     val outstationWaitRate: Double = 0.0,
+    val outstationAdditionalWaitingHours: Double = 0.0,
     val outstationDriverBata: Double = 0.0,
     val outstationAdditionalCharges: Double = 0.0,
     val extraChargeItems: List<ExtraChargeItem> = emptyList(),
